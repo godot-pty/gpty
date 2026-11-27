@@ -5,7 +5,7 @@ weight: 12
 
 The roadmap is a prioritized queue. `ROADMAP.md` is the root index; each release chain is a page under `docs/content/docs/roadmap/` (`v0.1.md` … `v1.0.md`, `future.md`); each row's evidence is a section on `docs/content/docs/roadmap/details/<area>.md`. The stable ID is the join key: the capability catalogue, commit trailers and cross-references name a row by `AREA-N`, never by its title.
 
-`scripts/roadmap` is the reader and writer. Start a task with `./scripts/roadmap next`; read `./scripts/roadmap show <ID>` instead of the chain page - the page is the queue, the detail section is the record. The other commands are `next-id`, `close`, `rearea`, `stats` and `release-check`.
+`scripts/roadmap` is the reader and writer. Start a task with `./scripts/roadmap next`; read `./scripts/roadmap show <ID>` instead of the chain page - the page is the queue, the detail section is the record. The other commands are `next-id`, `add`, `move`, `record`, `close`, `rearea`, `stats`, `release-check` and `audit`.
 
 ## Anatomy
 
@@ -33,7 +33,8 @@ Commits: 1a2b3c4, 5d6e7f8
 
 ## Queue rules
 
-- **The queue is the priority:** within a release, row order *is* the priority, and the first unchecked row (⬜) in the earliest unfinished release is the answer to "what's next" (`./scripts/roadmap next`).
+- **The queue is the priority:** within a release, row order *is* the priority, and the first unchecked row (⬜) in the earliest unfinished release is the answer to "what's next" (`./scripts/roadmap next`). `next --limit N` lists more, `--chain PAGE` and `--area AREA` narrow the same query, and `--json` prints a list for a tool to read.
+- **Open counts are data, not prose:** `ROADMAP.md`'s release-chain list carries each page's open count (`- planned, 114 open`). `./scripts/roadmap stats --write` writes it, `add`, `move` and `close` refresh it, and `./scripts/roadmap audit` fails a stale line.
 - **Release chain order:** open the chain pages in version order; `future.md` is never picked from.
 - **No separate grouping:** no headings by origin or carry-over. Finished rows stay in place, and the changelog carries the user-facing release notes.
 
@@ -66,14 +67,16 @@ Never embed an image in an index row, a detail section or a chain page. Release 
 - A commit that advances a row carries a `Roadmap: <ID>` trailer (e.g. `Roadmap: GUI-188`).
 - `./scripts/roadmap close <ID>` reads those trailers, falls back to the row's line history for pre-ledger work, and writes the oldest-first `Commits:` list. Never hand-type a hash.
 - `Commits: unrecorded` is written only under `--force`, when no commit can be attributed. It is a gap to fix, not a value to reuse.
-- `./scripts/roadmap release-check vX.Y.Z` fails a release that still has an open row in its section, or a closed row without a `Commits:` line.
+- `./scripts/roadmap release-check vX.Y.Z` fails a release that still has an open row in its section, or a closed row without a `Commits:` line; `--open` lists the open rows (id and title) instead of failing on them.
 
 ## Adding a row
 
-1. Allocate: `./scripts/roadmap next-id <AREA>`.
-2. Add the index row at its priority position, linking `details/<area>.md#<id>`.
-3. Add the `## <ID>` section to that area's detail page with the evidence that makes it actionable: the failure observation (build, date, command), the code location, the fix direction, the tests to add, the measured numbers.
-4. A defect or follow-up discovered while working another row gets its own row in priority position - never a silent fix, a comment, or a fold into an unrelated commit.
+1. Write the detail body to a file. Its first paragraph is `**Title** - evidence`, and the evidence is what makes the row actionable: the failure observation (build, date, command), the code location, the fix direction, the tests to add, the measured numbers.
+2. Add it: `./scripts/roadmap add <AREA> --body-file FILE`. It allocates the next ID, writes the `## <ID>` section and places the index row at the end of the working section; `--after ROW` and `--before ROW` put it at its priority position, `--chain PAGE` names another release chain, and `--dry-run` prints the row and writes nothing. The body is wrapped at 100 columns.
+3. Rewrite a row's evidence later with `./scripts/roadmap record <ID> --body-file FILE`, or add a paragraph with `--append`. A retitle is a two-file edit: `record` refuses a body whose title differs from the index row's.
+4. `./scripts/roadmap move <ID> <release>` moves an open row between releases or chains; the ID and the detail section do not change.
+5. A defect or follow-up discovered while working another row gets its own row in priority position - never a silent fix, a comment, or a fold into an unrelated commit.
+6. `./scripts/roadmap audit` proves the ledger's evidence: every `Commits:` hash is reachable, no detail or screenshot line is over 768 bytes, every ID cited in prose is a row, a dropped or won't-fix row states why, and the release-chain list's open counts match. `ci-check` and the `Docs` workflow run it.
 
 ## Closing a row
 

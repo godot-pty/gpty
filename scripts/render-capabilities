@@ -32,31 +32,22 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shutil
 import sys
 from pathlib import Path
 
+import roadmap_lib
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "docs" / "data" / "capabilities"
-ROADMAP_DIR = ROOT / "docs" / "content" / "docs" / "roadmap"
 MARKER = ".generated"
 
 STATUS_ORDER = ["planned", "partial", "undecided", "done", "rejected"]
-ROW = re.compile(r"^\| (?:✅|⬜|🚫) \| \[([A-Z]+-\d+)\]\(details/[^)]*\) \| \*\*(.+?)\*\* \|$")
 
 
 def roadmap_titles() -> dict[str, str]:
     """Stable ID -> title, from the chain pages' index rows."""
-    titles: dict[str, str] = {}
-    for path in sorted(ROADMAP_DIR.glob("*.md")):
-        if path.name == "_index.md":
-            continue
-        for line in path.read_text(encoding="utf-8").split("\n"):
-            row = ROW.match(line)
-            if row:
-                titles.setdefault(row.group(1), row.group(2))
-    return titles
+    return {rid: row.title for rid, row in roadmap_lib.rows(ROOT).items()}
 
 
 def load(area: str | None) -> list[dict]:

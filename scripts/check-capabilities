@@ -37,43 +37,21 @@ import re
 import sys
 from pathlib import Path
 
+import roadmap_lib
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "docs" / "data" / "capabilities"
-ROADMAP_DIR = ROOT / "docs" / "content" / "docs" / "roadmap"
 
 STATUSES = {"done", "partial", "planned", "rejected", "undecided"}
 TOP_KEYS = {"area", "capabilities"}
 RECORD_KEYS = {"id", "statement", "status", "spec", "mechanism", "evidence", "row"}
 REQUIRED = {"id", "statement", "status"}
 ID = re.compile(r"^[a-z][a-z0-9]*(?:\.[a-z0-9][a-z0-9-]*){1,3}$")
-ROW = re.compile(r"^\| (?:✅|⬜|🚫|❌) \| \[([A-Z]+-\d+)\]\(details/[^)]*\) \| \*\*(.+?)\*\* \|$")
 ROW_ID = re.compile(r"^[A-Z]+-\d+$")
 URL = re.compile(r"https?://|www\.", re.I)
 
 STATEMENT_MAX = 200
 MECHANISM_MAX = 500
-
-
-def areas() -> set[str]:
-    """The ID-prefix vocabulary, from ROADMAP.md's opening text."""
-    m = re.search(
-        r"ID prefix names[^(]*\(([A-Z, ]+)\)",
-        (ROOT / "ROADMAP.md").read_text(encoding="utf-8"),
-    )
-    return {a.strip() for a in m.group(1).split(",")} if m else set()
-
-
-def roadmap_ids() -> set[str]:
-    """Every stable ID on every chain page's index row, `| status | [ID](details/...) |`."""
-    ids: set[str] = set()
-    for path in sorted(ROADMAP_DIR.glob("*.md")):
-        if path.name == "_index.md":
-            continue
-        for line in path.read_text(encoding="utf-8").split("\n"):
-            row = ROW.match(line)
-            if row:
-                ids.add(row.group(1))
-    return ids
 
 
 def evidence_file(value: str) -> bool:
@@ -169,11 +147,11 @@ def check_file(path: Path, known_areas: set[str], rows: set[str],
 
 def main() -> int:
     problems: list[str] = []
-    known_areas = areas()
+    known_areas = set(roadmap_lib.areas(ROOT))
     if not known_areas:
         print("check-capabilities: could not read the Area list from ROADMAP.md")
         return 1
-    rows = roadmap_ids()
+    rows = set(roadmap_lib.rows(ROOT))
     if not rows:
         print("check-capabilities: could not read roadmap IDs")
         return 1

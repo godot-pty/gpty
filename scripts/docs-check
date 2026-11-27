@@ -2,6 +2,8 @@
 """Check the markdown the project ships: links, anchors and the split-page structure.
 
 Standard library only; run from anywhere. Exits 1 and lists every problem found.
+`DOCS_ROOT` overrides the tree it reads, so `scripts/tooling-smoke` can run the
+checks against a fixture copy.
 
   * every relative link in a markdown file resolves to a file, and its #anchor
     resolves to a heading (links into Hugo shortcodes and absolute URLs are skipped)
@@ -15,6 +17,9 @@ Standard library only; run from anywhere. Exits 1 and lists every problem found.
     a closed row's `Commits:` line, valid code citations, no images
   * roadmap screenshot pages: front matter and a `## Screenshots` section, and
     no captures on a queue page
+  * roadmap detail and screenshot pages: no line over 768 bytes (the width a
+    7 KB evidence line broke), and every screenshot page is linked from a page
+    outside `screenshots/` (an orphan page loses its captures)
   * ROADMAP.md, CHANGELOG.md and AGENTS.md link exactly the pages under
     docs/content/docs/{roadmap,changelog,agents}/, and nothing links a page that
     does not exist
@@ -27,9 +32,11 @@ import re
 import subprocess
 import sys
 
+import roadmap_lib
+
 argparse.ArgumentParser(description=__doc__).parse_args()
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.environ.get('DOCS_ROOT') or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # What ships is what this gate judges. `TEMP*` is the scratch convention
 # `.gitignore` already ignores (blog drafts, forensics baselines); the walk sees
 # the worktree, so without `TEMP/` here a draft's unfinished links fail a gate
@@ -78,15 +85,6 @@ def strip_code(text):
     return re.sub(r'`[^`\n]*`', '', text)
 
 
-def front_matter(text):
-    m = re.match(r'---\n(.*?)\n---\n', text, re.S)
-    if not m:
-        return None
-    return dict(
-        (k.strip(), v.strip().strip('"'))
-        for k, _, v in (line.partition(':') for line in m.group(1).split('\n')) if k.strip())
-
-
 FILES = markdown_files()
 ANCHORS = {}
 for f in FILES:
@@ -95,6 +93,9 @@ for f in FILES:
 # ── links and anchors ────────────────────────────────────────────────────
 link_re = re.compile(r'(?<!\!)\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)')
 img_re = re.compile(r'!\[[^\]]*\]\(([^)\s]+)\)')
+# target -> the pages linking it; the screenshot orphan check needs the reverse
+# of a link that resolved, which `bad()` alone cannot see.
+LINKED_BY = {}
 for f in FILES:
     text = strip_code(read(f))
     for m in link_re.finditer(text):
@@ -103,6 +104,8 @@ for f in FILES:
             continue
         path, _, frag = url.partition('#')
         target = os.path.normpath(os.path.join(os.path.dirname(f), path)).replace(os.sep, '/') if path else f
+        if path:
+            LINKED_BY.setdefault(target, set()).add(f)
         if path and not os.path.exists(os.path.join(ROOT, target)):
             bad(f, f'link to missing file: {url}')
         elif frag and target in ANCHORS and slug(frag) not in ANCHORS[target] and frag not in ANCHORS[target]:
@@ -139,7 +142,7 @@ for root_md, folder, fields in (
     for p in pages:
         if p not in linked:
             bad(root_md, f'does not link {d}/{p}')
-        fm = front_matter(read(f'{d}/{p}'))
+        fm = roadmap_lib.front_matter(read(f'{d}/{p}'))
         missing = [field for field in fields if not fm or field not in fm]
         if missing:
             bad(f'{d}/{p}', f'front matter needs {", ".join(fields)}')
@@ -237,13 +240,9 @@ for guide in guides:
             bad(guide, f'path does not exist: {token}')
 
 # ── roadmap tables ───────────────────────────────────────────────────────
-m = re.search(r'ID prefix names[^(]*\(([A-Z, ]+)\)', read('ROADMAP.md'))
-AREAS = {a.strip() for a in m.group(1).split(',')} if m else set()
+AREAS = set(roadmap_lib.areas(ROOT))
 if not AREAS:
     bad('ROADMAP.md', 'could not read the Area list from the opening text')
-row_re = re.compile(
-    r'^\| (✅|⬜|🚫|❌) \| \[([A-Z]+-\d+)\]\(details/([a-z]+)\.md#([a-z]+-\d+)\) '
-    r'\| \*\*(.+?)\*\* \|$')
 seen = {}
 index_titles = {}
 index_status = {}
@@ -258,11 +257,11 @@ for p in sorted(os.listdir(os.path.join(ROOT, rd))):
         where = f'{rd}/{p}:{n}'
         if '![' in strip_code(line):
             bad(where, 'image inside a table row (list it under "## Screenshots" instead)')
-        r = row_re.match(line)
+        r = roadmap_lib.parse_row(line)
         if not r:
-            bad(where, 'row is not `| ✅/⬜/🚫/❌ | [AREA-N](details/area.md#area-n) | **Title** |`')
+            bad(where, f'row is not `{roadmap_lib.ROW_SHAPE}`')
             continue
-        status, rid, area_file, anchor, title = r.groups()
+        status, rid, area_file, anchor, title = r
         prefix = rid.split('-', 1)[0]
         if prefix not in AREAS:
             bad(where, f'unknown area prefix {prefix} in {rid}')
@@ -279,7 +278,6 @@ for p in sorted(os.listdir(os.path.join(ROOT, rd))):
             bad(where, f'title duplicates {seen_titles[title]}: {title[:60]}')
         seen_titles[title] = where
 
-commit_re = re.compile(r'^Commits: (unrecorded|[0-9a-f]{7,40}(?:, [0-9a-f]{7,40})*)$')
 details_dir = f'{rd}/details'
 detail_of = {}
 if not os.path.isdir(os.path.join(ROOT, details_dir)):
@@ -290,7 +288,9 @@ else:
             continue
         where = f'{details_dir}/{p}'
         text = read(where)
-        fm = front_matter(text)
+        for n, size in roadmap_lib.long_lines(text):
+            bad(f'{where}:{n}', f'line is {size} bytes (cap {roadmap_lib.MAX_LINE})')
+        fm = roadmap_lib.front_matter(text)
         for field in ('title', 'weight'):
             if not fm or field not in fm:
                 bad(where, f'front matter needs {field}')
@@ -328,7 +328,7 @@ else:
             if status == '✅':
                 if len(commits) != 1:
                     bad(at, 'a closed row needs exactly one `Commits:` line')
-                elif not commit_re.match(commits[0]):
+                elif not roadmap_lib.COMMIT_RE.match(commits[0]):
                     bad(at, f'bad Commits line: {commits[0][:80]}')
             elif status == '⬜':
                 if commits:
@@ -336,7 +336,7 @@ else:
             elif status == '❌':
                 if commits:
                     bad(at, "a won't-fix row must not carry a `Commits:` line")
-            elif commits and not commit_re.match(commits[0]):
+            elif commits and not roadmap_lib.COMMIT_RE.match(commits[0]):
                 bad(at, f'bad Commits line: {commits[0][:80]}')
 
 for rid in sorted(set(seen) - set(detail_of)):
@@ -358,7 +358,12 @@ if os.path.isdir(os.path.join(ROOT, shots_dir)):
             continue
         where = f'{shots_dir}/{p}'
         text = read(where)
-        fm = front_matter(text)
+        for n, size in roadmap_lib.long_lines(text):
+            bad(f'{where}:{n}', f'line is {size} bytes (cap {roadmap_lib.MAX_LINE})')
+        sources = LINKED_BY.get(where, set()) - {where}
+        if not any(not s.startswith(f'{shots_dir}/') for s in sources):
+            bad(where, 'screenshot page is not linked from any markdown page')
+        fm = roadmap_lib.front_matter(text)
         for field in ('title', 'weight'):
             if not fm or field not in fm:
                 bad(where, f'front matter needs {field}')

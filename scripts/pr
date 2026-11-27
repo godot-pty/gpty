@@ -78,6 +78,17 @@ split_plan() {
     printf 'split %s\n' "$w"
 }
 
+# The remote half of the split: 0 when the maintainer must push `w` first. A
+# remote that already carries it (a previous `push` on this branch) needs only
+# the bot push; an empty remote, or one whose commit is not fetched yet, takes
+# the maintainer push, which fails loudly rather than skipping a needed one.
+needs_maintainer() {
+    local w=$1 remote=$2
+    [ -n "$w" ] || return 1
+    [ -n "$remote" ] || return 0
+    ! git merge-base --is-ancestor "$w" "$remote" 2>/dev/null
+}
+
 author_refusal() {
     [ "$1" = "app/gpty-bot" ] || {
         printf 'pr: PR author is %s, not app/gpty-bot; only a bot-authored PR can be approved by someone other than its last pusher\n' "$1" >&2
@@ -233,7 +244,7 @@ cmd_push() {
         git fetch --no-tags origin "$base" || die "cannot fetch origin/$base"
     fi
 
-    local head w
+    local head w remote push_w
     head=$(git rev-parse HEAD)
     w=$(git rev-list "origin/$base..HEAD" -- .github/workflows | head -1 || true)
     if $dry; then
@@ -245,12 +256,22 @@ cmd_push() {
             echo "pr: REFUSED: the newest commit $w touches .github/workflows; add a non-workflow commit after it"
             exit 2
         else
-            printf 'pr: maintainer push %s\npr: bot push %s\n' "$w" "$head"
+            if remote=$(git ls-remote --heads origin "refs/heads/$branch" 2>/dev/null | cut -f1); then
+                :
+            else
+                remote=""
+                echo "pr: cannot read the remote branch (offline); planning the maintainer push"
+            fi
+            if needs_maintainer "$w" "$remote"; then
+                printf 'pr: maintainer push %s\npr: bot push %s\n' "$w" "$head"
+            else
+                printf 'pr: workflow commit %s is already on origin/%s; bot push %s\n' \
+                    "$w" "$branch" "$head"
+            fi
         fi
         return 0
     fi
 
-    local remote
     remote=$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1) || die "cannot read the remote branch"
     if [ "$remote" = "$head" ]; then
         echo "pr: already at HEAD; no push (a new commit is what makes the bot the last pusher)"
@@ -259,19 +280,31 @@ cmd_push() {
     if [ "$w" = "$head" ]; then
         die "the newest commit touches .github/workflows; add a non-workflow commit after it"
     fi
+    push_w=$w
+    if [ -n "$w" ] && [ -n "$remote" ] && ! git cat-file -e "$remote^{commit}" 2>/dev/null; then
+        # A branch someone else pushed: fetch the object the containment test
+        # needs. Falling back to the maintainer push after a failed fetch is
+        # today's behaviour, never a silently skipped push.
+        git fetch --no-tags origin "refs/heads/$branch" >/dev/null 2>&1 || true
+    fi
+    if ! needs_maintainer "$w" "$remote"; then
+        push_w=""
+    fi
 
     local token bt mt
     token=$(./scripts/bot-token) || die "cannot mint the bot token"
     bt=$(token_file "$token")
-    if [ -n "$w" ]; then
+    if [ -n "$push_w" ]; then
         need_gh
         token=$(gh auth token) || die "cannot read the maintainer token (run gh auth login)"
         mt=$(token_file "$token")
         GIT_ASKPASS="$PWD/scripts/git-askpass-token" GIT_TERMINAL_PROMPT=0 \
             GPTY_GIT_TOKEN_FILE="$mt" GPTY_BOT_TOKEN_FILE= \
-            git push "https://github.com/$repo.git" "$w:refs/heads/$branch" \
+            git push "https://github.com/$repo.git" "$push_w:refs/heads/$branch" \
             || die "maintainer push failed"
-        echo "pr: maintainer push $w"
+        echo "pr: maintainer push $push_w"
+    elif [ -n "$w" ]; then
+        echo "pr: workflow commit $w is already on origin/$branch; bot push only"
     fi
     GIT_ASKPASS="$PWD/scripts/git-askpass-token" GIT_TERMINAL_PROMPT=0 \
         GPTY_GIT_TOKEN_FILE= GPTY_BOT_TOKEN_FILE="$bt" \
@@ -461,19 +494,43 @@ cmd_selftest() {
     printf 'base\n' > "$dir/base.txt"
     fixture_git add -A
     fixture_git commit -qm base
+    local base
+    base=$(fixture_git rev-parse HEAD)
     fixture_git switch -qc feature
     mkdir -p "$dir/.github/workflows"
     printf 'name: probe\n' > "$dir/.github/workflows/probe.yml"
     fixture_git add -A
     fixture_git commit -qm workflow
-    local w h plan
+    local w h plan wf remote
     w=$(fixture_git rev-parse HEAD)
+    wf=$w
     printf 'docs\n' > "$dir/docs.md"
     fixture_git add -A
     fixture_git commit -qm docs
     h=$(fixture_git rev-parse HEAD)
     plan=$( ( clean_git_env; cd "$dir" && split_plan main HEAD ) )
     [ "$plan" = "split $w" ] || die "selftest: split plan was '$plan', expected 'split $w'"
+
+    # The remote decision: a workflow commit a previous push already landed
+    # needs the bot push only; a remote behind it still gets the maintainer push.
+    ( clean_git_env; git init -q --bare "$tmp/remote.git" )
+    fixture_git remote add origin "$tmp/remote.git"
+    fixture_git push -q origin "$wf:refs/heads/feature"
+    remote=$(fixture_git ls-remote --heads origin refs/heads/feature | cut -f1)
+    if ( clean_git_env; cd "$dir" && needs_maintainer "$wf" "$remote" ); then
+        die 'selftest: an already-remote workflow commit still needed the maintainer push'
+    fi
+    fixture_git push -q origin "$base:refs/heads/behind"
+    remote=$(fixture_git ls-remote --heads origin refs/heads/behind | cut -f1)
+    if ! ( clean_git_env; cd "$dir" && needs_maintainer "$wf" "$remote" ); then
+        die 'selftest: a remote behind the workflow commit skipped the maintainer push'
+    fi
+    if ! ( clean_git_env; cd "$dir" && needs_maintainer "$wf" "" ); then
+        die 'selftest: an empty remote did not need the maintainer push'
+    fi
+    if ( clean_git_env; cd "$dir" && needs_maintainer "" "$remote" ); then
+        die 'selftest: a branch with no workflow commit needed the maintainer push'
+    fi
 
     printf 'name: probe2\n' > "$dir/.github/workflows/probe2.yml"
     fixture_git add -A
@@ -489,7 +546,7 @@ cmd_selftest() {
     if land_refusal app/gpty-bot REVIEW_REQUIRED 2>/dev/null; then
         die "selftest: an unapproved bot PR was allowed"
     fi
-    printf 'pr: selftest passed (split, W==HEAD refusal, land refusals)\n'
+    printf 'pr: selftest passed (split, W==HEAD refusal, remote containment, land refusals)\n'
 }
 
 case "${1:-}" in

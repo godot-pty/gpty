@@ -32,7 +32,7 @@ This installs:
 - `commit-msg` (Conventional Commits enforcement)
 - `pre-push` (full CI suite).
 
-Run `./scripts/ci-check` directly to validate changes before committing.
+Run `./scripts/ci-check` directly to validate changes before committing; `--summary` prints one named result per gate and puts the full output in `/tmp/gpty-ci-check` (the pre-push hook uses it, and `CI_CHECK_VERBOSE=1 git push` streams it instead).
 
 ### Build media dependencies (once per checkout)
 
@@ -196,7 +196,8 @@ omp plugin link "$(pwd)/extensions/gpty-omp-events"
 # dangerous triggers, job timeouts and concurrency groups)
 ./scripts/lint-workflows
 
-# Run all CI checks locally (fmt, workflow lint, clippy, tests, GUT, audit)
+# Run all CI checks locally (fmt, workflow lint, clippy, tests, GUT, audit);
+# --summary prints one named result per gate, with the logs in /tmp/gpty-ci-check
 ./scripts/ci-check
 
 # Fast checks only (fmt, workflow lint, clippy)

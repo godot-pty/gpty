@@ -10,6 +10,10 @@
 # base, so it is classified against its merge-base with origin/main; a missing
 # base or a multi-ref push still means the full suite. The --stamped path lets a
 # repeated push of the same clean tree skip the suite it already passed.
+#
+# The gate prints a summary (one named result per gate, logs in
+# /tmp/gpty-ci-check) rather than every gate's output; CI_CHECK_VERBOSE=1
+# streams it instead.
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 CI_CHECK="${CI_CHECK_BIN:-$REPO_ROOT/scripts/ci-check}"
@@ -58,7 +62,9 @@ if $RANGE_USABLE && [[ -n "$RANGE_FROM" ]]; then
 fi
 
 if [[ -x "$CI_CHECK" ]]; then
-    "$CI_CHECK" --stamped
+    SUMMARY=()
+    [[ "${CI_CHECK_VERBOSE:-0}" == "1" ]] || SUMMARY=(--summary)
+    "$CI_CHECK" --stamped "${SUMMARY[@]}"
     STATUS=$?
     if [[ $STATUS -ne 0 ]]; then
         echo ""
