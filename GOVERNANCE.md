@@ -12,14 +12,14 @@ The maintainer roster and access rules are in [MAINTAINERS.md](MAINTAINERS.md).
 ## Decisions
 
 - The maintainer makes the final decision and records product work in [ROADMAP.md](ROADMAP.md).
-- `main` is the trunk. Day-to-day work lands there through a pull request the maintainer approves; the active line is tagged from `main`, and a line in maintenance is cherry-picked onto `release/vX.Y` and tagged there. The `gpty-bot` GitHub App pushes work branches and opens the pull request; it cannot create or update workflow files, cannot bypass `main` or `release/v*` protection, and never approves or merges.
+- `main` is the trunk. Day-to-day work lands there through a pull request the maintainer approves; the active line is tagged from `main`, and a line in maintenance is cherry-picked onto `release/vX.Y` and tagged there. The `gpty-bot` GitHub App pushes work branches and opens the pull request (`scripts/pr push` and `scripts/pr open`); it cannot create or update workflow files, cannot bypass `main` or `release/v*` protection, and never approves or merges.
 - Security reports and their handling follow [SECURITY.md](SECURITY.md). A confirmed vulnerability is fixed on `main`, shipped in the next release, and disclosed in a private advisory published with the fix.
 - A disagreement about a change is resolved in the issue or pull request; if it cannot be, the maintainer decides and gives the reason in the thread.
 
 ## Access
 
 - The organization requires two-factor authentication.
-- The maintainer holds organization-owner and repository-admin access. The `gpty-bot` GitHub App is installed on `godot-pty/gpty` (selected repositories) and grants exactly contents write, pull-request write and metadata read; `scripts/bot-token --check` verifies the grant and warns on extras. The app has no administration permission and no bypass on `main` or `release/v*`.
+- The maintainer holds organization-owner and repository-admin access. The `gpty-bot` GitHub App is installed on `godot-pty/gpty` (selected repositories) and grants exactly contents write, pull-request write and metadata read; `scripts/pr` uses it, and `scripts/bot-token --check` verifies the grant and warns on extras. The app has no administration permission and no bypass on `main` or `release/v*`.
 - Access is granted by the organization owner after a period of sustained contribution and review, recorded in [MAINTAINERS.md](MAINTAINERS.md), and revoked when the person steps down or is inactive for 90 days. The app's private key is stored outside the repository and rotated from the app's settings; the app is not a collaborator and has no organization-owner access.
 - The `v*` tag ruleset, the `main` branch ruleset, the `release/v*` branch ruleset and classic branch protection are the release and review gates. The repository settings are the source of truth when this page and the settings disagree.
 

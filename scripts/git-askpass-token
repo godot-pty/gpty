@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
-# GIT_ASKPASS helper: return the short-lived token bot-push exported.
+# GIT_ASKPASS helper: return the token `scripts/pr` exported.
+# `GPTY_GIT_TOKEN_FILE` is the maintainer's credential (the workflow split);
+# `GPTY_BOT_TOKEN_FILE` is the gpty-bot installation token (the final push).
 set -euo pipefail
-if [ -n "${GPTY_BOT_TOKEN_FILE:-}" ] && [ -f "$GPTY_BOT_TOKEN_FILE" ]; then
+if [ -n "${GPTY_GIT_TOKEN_FILE:-}" ] && [ -f "$GPTY_GIT_TOKEN_FILE" ]; then
+    cat "$GPTY_GIT_TOKEN_FILE"
+elif [ -n "${GPTY_BOT_TOKEN_FILE:-}" ] && [ -f "$GPTY_BOT_TOKEN_FILE" ]; then
     cat "$GPTY_BOT_TOKEN_FILE"
+elif [ -n "${GPTY_GIT_TOKEN:-}" ]; then
+    printf '%s\n' "$GPTY_GIT_TOKEN"
+elif [ -n "${GPTY_BOT_TOKEN:-}" ]; then
+    printf '%s\n' "$GPTY_BOT_TOKEN"
 else
-    printf '%s\n' "${GPTY_BOT_TOKEN:?GPTY_BOT_TOKEN or GPTY_BOT_TOKEN_FILE is not set}"
+    printf '%s\n' "GPTY_GIT_TOKEN_FILE/GPTY_BOT_TOKEN_FILE or GPTY_GIT_TOKEN/GPTY_BOT_TOKEN is not set" >&2
+    exit 1
 fi

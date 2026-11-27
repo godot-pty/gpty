@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Syntax and plan smoke for the tooling scripts that never build the app.
+#
+# Usage: scripts/tooling-smoke
+#
+# Run by scripts/ci-check's tooling class and full gate, and by the `docs` CI
+# job. It prints one `ok` line per check and the captured output of a failure;
+# exit 1 if any check failed.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+fail=0
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/gpty-tooling.XXXXXX")"
+cleanup() { rm -rf "$tmp"; }
+trap cleanup EXIT
+
+check() {
+    local name=$1
+    shift
+    local out
+    if out="$("$@" 2>&1)"; then
+        printf 'ok %s\n' "$name"
+    else
+        printf 'FAIL %s\n%s\n' "$name" "$out" >&2
+        fail=1
+    fi
+}
+
+# bash -n for the shells; ci-check and this file are included so a syntax
+# error in the gate itself fails the gate.
+for f in scripts/ci-check scripts/measure-cost scripts/backfill-cost-history \
+    scripts/install-cli scripts/check-secrets scripts/bot-token scripts/pr \
+    scripts/git-askpass-token scripts/install-rust scripts/tooling-smoke; do
+    check "bash -n $f" bash -n "$f"
+done
+
+# A compile for the Python tools (no imports executed).
+for f in scripts/render-cost-chart scripts/fix-forensics scripts/check-github-settings \
+    scripts/install-godot scripts/release-prepare; do
+    check "compile $f" python3 -c \
+        'import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)' \
+        "$f" "$tmp/$(basename "$f").pyc"
+done
+
+# A folder of release archives when this machine has one, otherwise an empty
+# temp root: the plan must parse and exit 0 either way.
+root="${GPTY_RELEASES:-/mnt/App/gPTY}"
+if [ ! -d "$root" ]; then
+    root="$tmp/releases"
+    mkdir -p "$root"
+fi
+check "backfill plan" ./scripts/backfill-cost-history --dry-run "$root"
+
+# The static secret gate scans the git index; the full-history scan is gitleaks
+# in .github/workflows/secret-scan.yml.
+check "check-secrets" ./scripts/check-secrets
+
+# The PR tool's pure decision functions: the workflow split, the W==HEAD
+# refusal and the land refusals. No gh, no network.
+check "pr selftest" ./scripts/pr selftest
+
+exit "$fail"

@@ -17,9 +17,9 @@ gPTY is maintained by one person. This file is the maintainer roster that LFX In
 
 | App | Installation | Permissions | Purpose |
 | --- | --- | --- | --- |
-| `gpty-bot` (app ID 5789319) | `godot-pty/gpty` (selected repositories) | Contents: write; Pull requests: write; Metadata: read | Pushes work and release-prep branches and opens the pull request; it cannot create or update workflow files, cannot bypass `main` or `release/v*` protection, and never approves or merges. |
+| `gpty-bot` (app ID 5789319) | `godot-pty/gpty` (selected repositories) | Contents: write; Pull requests: write; Metadata: read | `scripts/pr push`/`open` push work and release-prep branches and open the pull request; it cannot create or update workflow files, cannot bypass `main` or `release/v*` protection, and never approves or merges. |
 
-The app is an installation, not a maintainer or collaborator: it grants exactly contents write, pull-request write and metadata read, with no administration permission and no organization-owner access. The installation is restricted to `godot-pty/gpty`; `scripts/bot-token --check` verifies the grant and warns on extras. Its private key is stored outside the repository (local: `~/.config/gpty/gpty-bot.pem`, mode 0600; Actions: the `GPTY_BOT_PRIVATE_KEY` secret), rotated from the app's settings, and removed by uninstalling the app. The organization owner installs and removes it.
+The app is an installation, not a maintainer or collaborator: it grants exactly contents write, pull-request write and metadata read, with no administration permission and no organization-owner access. The installation is restricted to `godot-pty/gpty`; `scripts/bot-token --check` verifies the grant and warns on extras. Its private key is stored outside the repository (local: `~/.config/gpty/gpty-bot.pem`, mode 0600, the default `scripts/bot-token` reads; Actions: the `GPTY_BOT_PRIVATE_KEY` secret), rotated from the app's settings, and removed by uninstalling the app. The organization owner installs and removes it.
 
 ## Adding or removing a maintainer
 
