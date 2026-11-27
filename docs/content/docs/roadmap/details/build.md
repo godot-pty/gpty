@@ -2044,6 +2044,8 @@ committed ledger). `scripts/tooling-smoke` builds two archives (the canonical di
 `--force`, and the `0.9.9`/`0.10.0` version sort. The fixture passes in under a second and never
 measures.
 
+Commits: 4877268, 18e42af, f830b0d
+
 ## BUILD-97
 
 **Half of every GUT run is fixed `create_timer(2.1)` sleeps** - measured 2026-11-02 on a green run:
@@ -2064,8 +2066,10 @@ three consecutive runs are green.
 teardown no longer resumes a coroutine. All 73 fixed `create_timer(2.1)` waits are gone: 69 removed,
 four (the plugin-content refresh) rewritten as `TestWaits.until`. The new regression frees a
 settling workspace and waits 2.2 s inside GUT. Measured: baseline 314.4 s (135/136 scripts, because
-the new test file landed during that run), first post-change run 160.8 s with 136 scripts / 1804
-tests all green; the close-out records the two further green runs.
+the new test file landed during that run), then 160.8 s, 155.8 s and 156.0 s, all green with 136
+scripts / 1804 tests. The suite is at least 40 s faster on every run.
+
+Commits: 73452fe, 6cecfd6, 18e42af, b028ee9
 
 ## BUILD-98
 
@@ -2149,6 +2153,8 @@ Godot loads the stripped extension (the pane-API smoke is the load proof).
 `build-linux`/`build-windows`/`build-macos` wall times remain the tag/dispatch proof; this machine's
 clean build is the local number.
 
+Commits: 84be075, 18e42af, b021fb4
+
 ## BUILD-101
 
 **The dev inner loop links every crate with the system linker and keeps full debug info** - there is
@@ -2174,6 +2180,8 @@ in the root manifest. On this machine an incremental `gpty-gdext` rebuild took 0
 system linker and 0.642 s with mold; a `gpty` rebuild took 0.416 s vs 0.436 s. The difference is
 within noise at this project size, so the helper stays opt-in rather than a hard dependency. The
 unpacked debug info costs 230,205,992 bytes of `.dwo` under `target/debug`.
+
+Commits: 84be075, 18e42af, b021fb4
 
 ## BUILD-102
 
@@ -2201,6 +2209,8 @@ filedescriptor 0.8.3 ← portable-pty 0.9.0; windows-sys 0.59.0 ← alacritty_te
 pinned by any released ffmpeg-sys-the-third, and dirs 7.0.0 is latest: no parent bump removes a pin.
 No dependency or lockfile change; the recorded skips live in BUILD-103.
 
+Commits: 84be075, 18e42af, 96d3797
+
 ## BUILD-103
 
 **`multiple-versions = "warn"` lets a new duplicate land with every gate green** - `deny.toml`'s
@@ -2219,6 +2229,8 @@ and the temporary change is reverted.
 versions with their parent/removal comments. `cargo deny check bans` is green. Proof: adding
 `hashbrown = "=0.14.5"` as a dev-dependency produced `found 2 duplicate entries for crate
 'hashbrown'` and exit 2; reverting the manifest and lockfile returned it to green.
+
+Commits: 84be075, 18e42af, f830b0d, 95a0db5
 
 ## BUILD-104
 
@@ -2240,6 +2252,8 @@ classes. The import and all three export steps call it; `--check-log` fixtures c
 allowed lines, an unknown parse error and a failed script load. A local
 `godot --headless --path godot --import` through the gate exits 0; the release dispatch is the
 end-to-end run.
+
+Commits: 8c58684, 18e42af, b021fb4, f830b0d
 
 ## BUILD-105
 
@@ -2321,6 +2335,8 @@ imports, runs `ui-capture --check`, the pane-API smoke, `--dir unit` and the fiv
 tests. `scripts/classify-changes` prints `macos=false` for a GDScript path and `macos=true` for
 `Cargo.toml`; the PR's macOS run is the remaining proof.
 
+Commits: 68f0558, 18e42af, f830b0d
+
 ## BUILD-108
 
 **`measure-cost --check` still hard-fails on a stamp older than the workspace** - found 2026-11-23
@@ -2337,6 +2353,8 @@ without moving the README stamp fails.
 `--stamp` is green. With the README stamp temporarily changed to v0.0.0, `--check` exits 1 with
 `measure-cost: STAMP: README names v0.0.0, newest ledger build is v0.8.6 - ...` before any launch;
 the README was restored.
+
+Commits: 7923ac2, 18e42af, f830b0d
 
 ## BUILD-109
 
@@ -2359,6 +2377,8 @@ states), then writes the typed-field probe, requires a `SCRIPT ERROR`, and remov
 exit; the dotfile falls back to `_gate_probe.gd`. `--check` prints `harness loads (85 states)` and
 `negative probe refused`; a clean scratch probe exits 1 with `the load gate no longer detects a
 typed app class`, and no probe file remains. `ci-check` and the Linux CI job call `--check`.
+
+Commits: 3153852, 18e42af, f830b0d
 
 ## BUILD-110
 
@@ -2383,6 +2403,8 @@ tree, the gate script, the pre-push hook and the rustc/cargo/Godot versions. `--
 a matching clean tree, `--stamp-check` reports, and `--stamp` runs the full gate and writes. The
 fast gate passes in 32.9 s; `--only docs` passes without reaching `cargo test`; the stamp fixture
 accepts itself and rejects every changed field and a dirty tree.
+
+Commits: 3153852, 18e42af, f830b0d
 
 ## BUILD-111
 
@@ -2431,6 +2453,8 @@ same set, `--help` exits 0 and prints usage, `--definitely-not-an-option` exits 
 `tooling-smoke`, `dev-linker`, `export-check` and `ci-check` now answer `--help` with usage and exit
 0; every listed script except the git prompt helper rejects an unknown option with exit 2.
 `tooling-smoke` loops the contract.
+
+Commits: 3153852, 18e42af, f830b0d
 
 ## BUILD-114
 
@@ -2717,6 +2741,8 @@ a delete) and say so in the hook comment.
 keeps the merge-base and multi-ref rules, and calls `ci-check --stamped`; `CI_CHECK_BIN` is the
 test seam. Fixtures prove a tag and a delete exit 0 without invoking the gate and a branch invokes
 `--stamped`.
+
+Commits: 5fbf5b5, f830b0d
 
 ## BUILD-135
 
