@@ -162,9 +162,11 @@ check_export_gate_fixture() {
         echo 'SCRIPT ERROR: Parse Error: Identifier "GptyTerminal" not declared in the current scope.'
         echo 'SCRIPT ERROR: Parse Error: Could not find type "X" in the current scope.'
         echo 'SCRIPT ERROR: Parse Error: Cannot infer the type of "failure" variable because the value does not have a set type.'
+        echo 'ERROR: Failed to load script "res://scenes/terminal/workspace.gd" with error "Parse error".'
+        echo 'ERROR: Failed to load script "res://scenes/autoloads/settings_manager.gd" with error "Parse error".'
     } >"$good"
     if ! ./scripts/export-check --check-log "$good" >/dev/null 2>&1; then
-        echo "the four known import-pass classes were refused"
+        echo "the known import-pass lines were refused"
         return 1
     fi
     printf 'SCRIPT ERROR: Parse Error: Unexpected token "x".\n' >"$bad"
