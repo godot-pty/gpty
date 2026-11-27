@@ -9,9 +9,27 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+usage() {
+    sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+case "${1:-}" in
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        echo "tooling-smoke: unknown option '$1'" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
+
 fail=0
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/gpty-tooling.XXXXXX")"
-cleanup() { rm -rf "$tmp"; }
+cleanup() { rm -rf "$tmp"; rm -f .gate-stamp-dirty; }
 trap cleanup EXIT
 
 check() {
@@ -26,13 +44,36 @@ check() {
     fi
 }
 
+check_fails() {
+    local name=$1
+    shift
+    local out
+    if out="$("$@" 2>&1)"; then
+        printf 'FAIL %s (exited 0)\n%s\n' "$name" "$out" >&2
+        fail=1
+    else
+        printf 'ok %s\n' "$name"
+    fi
+}
+
 # bash -n for the shells; ci-check and this file are included so a syntax
 # error in the gate itself fails the gate.
 for f in scripts/ci-check scripts/measure-cost scripts/backfill-cost-history \
     scripts/install-cli scripts/check-secrets scripts/bot-token scripts/pr \
-    scripts/git-askpass-token scripts/install-rust scripts/tooling-smoke; do
+    scripts/git-askpass-token scripts/install-rust scripts/tooling-smoke \
+    scripts/dev-linker scripts/export-check; do
     check "bash -n $f" bash -n "$f"
 done
+
+# The dev linker is opt-in; both outcomes are fixture-driven so the check does
+# not depend on the host's toolchain.
+mkdir -p "$tmp/linker/bin" "$tmp/linker/empty"
+printf '#!/bin/sh\nexit 0\n' >"$tmp/linker/bin/mold"
+chmod +x "$tmp/linker/bin/mold"
+check "dev-linker finds a fixture linker" \
+    env DEV_LINKER_BIN_DIR="$tmp/linker/bin" ./scripts/dev-linker --check
+check_fails "dev-linker reports no linker" \
+    env DEV_LINKER_BIN_DIR="$tmp/linker/empty" ./scripts/dev-linker --check
 
 # A compile for the Python tools (no imports executed).
 for f in scripts/render-cost-chart scripts/fix-forensics scripts/check-github-settings \
@@ -51,6 +92,94 @@ if [ ! -d "$root" ]; then
 fi
 check "backfill plan" ./scripts/backfill-cost-history --dry-run "$root"
 
+# The extraction, .pck discovery, skip rule and version sort are only exercised
+# by a fixture: a plain --dry-run against a folder with no archives stops at
+# the plan. Two archives, one canonical directory and one whose inner name is
+# unexpected (the .pck-parent fallback).
+check_backfill_fixture() {
+    local releases="$tmp/backfill/releases"
+    local pkg="$tmp/backfill/pkg"
+    local out order
+    mkdir -p "$releases" "$pkg/gpty-v0.9.9-linux-x86_64" "$pkg/unexpected-name"
+    : >"$pkg/gpty-v0.9.9-linux-x86_64/gpty-gui"
+    : >"$pkg/gpty-v0.9.9-linux-x86_64/gpty-gui.pck"
+    chmod +x "$pkg/gpty-v0.9.9-linux-x86_64/gpty-gui"
+    tar -czf "$releases/gpty-v0.9.9-linux-x86_64.tar.gz" \
+        -C "$pkg" gpty-v0.9.9-linux-x86_64
+    : >"$pkg/unexpected-name/gpty-gui.pck"
+    tar -czf "$releases/gpty-v0.10.0-linux-x86_64.tar.gz" \
+        -C "$pkg" unexpected-name
+    printf '{"releases":[{"version":"0.9.9"}]}\n' >"$tmp/backfill/ledger-0.9.9.json"
+    printf '{"releases":[]}\n' >"$tmp/backfill/ledger-empty.json"
+
+    out="$(GPTY_COST_LEDGER="$tmp/backfill/ledger-0.9.9.json" \
+        ./scripts/backfill-cost-history --dry-run "$releases" 2>&1)" || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    grep -q 'extracting gpty-v0.9.9-linux-x86_64.tar.gz' <<<"$out" || {
+        echo "missing the canonical archive extraction"; printf '%s\n' "$out"; return 1
+    }
+    grep -q 'extracting gpty-v0.10.0-linux-x86_64.tar.gz' <<<"$out" || {
+        echo "missing the fallback archive extraction"; printf '%s\n' "$out"; return 1
+    }
+    grep -q 'v0.9.9 already in the ledger - skipping (--force re-measures)' <<<"$out" || {
+        echo "missing the skip message"; printf '%s\n' "$out"; return 1
+    }
+    if grep -q 'would measure v0.9.9' <<<"$out"; then
+        echo "a version already in the ledger was planned"; printf '%s\n' "$out"; return 1
+    fi
+
+    out="$(GPTY_COST_LEDGER="$tmp/backfill/ledger-empty.json" \
+        ./scripts/backfill-cost-history --dry-run "$releases" 2>&1)" || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    order="$(grep 'would measure v' <<<"$out" \
+        | sed 's/would measure v\([0-9.]*\).*/\1/' | paste -sd, -)"
+    [ "$order" = "0.9.9,0.10.0" ] || {
+        echo "version sort is '$order', expected 0.9.9,0.10.0"; printf '%s\n' "$out"; return 1
+    }
+
+    out="$(GPTY_COST_LEDGER="$tmp/backfill/ledger-0.9.9.json" \
+        ./scripts/backfill-cost-history --dry-run --force "$releases" 2>&1)" || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    grep -q 'would measure v0.9.9' <<<"$out" || {
+        echo "--force did not re-plan the known version"; printf '%s\n' "$out"; return 1
+    }
+}
+check "backfill archive fixture" check_backfill_fixture
+
+# The export gate's closed list: the four known import-pass classes pass, any
+# other SCRIPT ERROR (or a failed script load) fails.
+check_export_gate_fixture() {
+    local good="$tmp/export-good.log" bad="$tmp/export-bad.log" load="$tmp/export-load.log"
+    {
+        echo "Godot Engine v4.7.2 - ordinary output"
+        echo 'SCRIPT ERROR: Parse Error: Could not resolve class "BasePersistenceManager".'
+        echo 'SCRIPT ERROR: Parse Error: Identifier "GptyTerminal" not declared in the current scope.'
+        echo 'SCRIPT ERROR: Parse Error: Could not find type "X" in the current scope.'
+        echo 'SCRIPT ERROR: Parse Error: Cannot infer the type of "failure" variable because the value does not have a set type.'
+    } >"$good"
+    if ! ./scripts/export-check --check-log "$good" >/dev/null 2>&1; then
+        echo "the four known import-pass classes were refused"
+        return 1
+    fi
+    printf 'SCRIPT ERROR: Parse Error: Unexpected token "x".\n' >"$bad"
+    if ./scripts/export-check --check-log "$bad" >/dev/null 2>&1; then
+        echo "an unlisted SCRIPT ERROR passed the gate"
+        return 1
+    fi
+    printf 'Failed to load script res://broken.gd\n' >"$load"
+    if ./scripts/export-check --check-log "$load" >/dev/null 2>&1; then
+        echo "a failed script load passed the gate"
+        return 1
+    fi
+}
+check "export gate fixture" check_export_gate_fixture
+
 # The static secret gate scans the git index; the full-history scan is gitleaks
 # in .github/workflows/secret-scan.yml.
 check "check-secrets" ./scripts/check-secrets
@@ -58,5 +187,92 @@ check "check-secrets" ./scripts/check-secrets
 # The PR tool's pure decision functions: the workflow split, the W==HEAD
 # refusal and the land refusals. No gh, no network.
 check "pr selftest" ./scripts/pr selftest
+
+# ── The tooling help contract ───────────────────────────────────────────
+# Every tooling/docs script answers --help with usage and rejects an unknown
+# option with exit 2. git-askpass-token is the exception: its argument is git's
+# prompt, so only --help is special.
+help_scripts=(
+    scripts/measure-cost scripts/render-cost-chart scripts/backfill-cost-history
+    scripts/fix-forensics scripts/install-cli scripts/check-secrets scripts/bot-token
+    scripts/pr scripts/git-askpass-token scripts/check-github-settings scripts/install-rust
+    scripts/install-godot scripts/release-prepare scripts/dev-linker scripts/export-check
+    scripts/build-wiki scripts/build-docs scripts/docs-check scripts/ui-capture
+    scripts/ui-capture-check scripts/ci-check scripts/tooling-smoke
+)
+for f in "${help_scripts[@]}"; do
+    check "help $f" "$f" --help
+done
+for f in "${help_scripts[@]}"; do
+    [[ "$f" == scripts/git-askpass-token ]] && continue
+    check_fails "unknown option $f" "$f" --definitely-not-an-option
+done
+
+# ── The local gate's step selection and stamp ──────────────────────────
+check_ci_list_steps() {
+    local out
+    out="$(./scripts/ci-check --list-steps)" || return 1
+    for id in media fmt tests gut cost; do
+        grep -qx "$id" <<<"$out" || { echo "missing step $id"; return 1; }
+    done
+}
+
+check_ci_only_docs() {
+    local out
+    out="$(./scripts/ci-check --only docs 2>&1)" || { printf '%s\n' "$out"; return 1; }
+    if grep -q 'cargo test' <<<"$out"; then
+        echo "a --only docs run reached cargo test"
+        return 1
+    fi
+}
+
+check_ci_stamp() {
+    local stamp="$tmp/ci-stamp" bad="$tmp/ci-stamp-bad" key
+    CI_CHECK_STAMP="$stamp" ./scripts/ci-check --stamp-print >"$stamp" || return 1
+    CI_CHECK_STAMP="$stamp" CI_CHECK_STAMP_IGNORE_DIRTY=1 \
+        ./scripts/ci-check --stamp-check >/dev/null || return 1
+    for key in tree ci-check pre-push rustc cargo godot; do
+        sed "s/^$key=.*/$key=changed/" "$stamp" >"$bad"
+        if CI_CHECK_STAMP="$bad" CI_CHECK_STAMP_IGNORE_DIRTY=1 \
+            ./scripts/ci-check --stamp-check >/dev/null 2>&1; then
+            echo "a changed $key was accepted"
+            return 1
+        fi
+    done
+    touch .gate-stamp-dirty
+    if CI_CHECK_STAMP="$stamp" ./scripts/ci-check --stamp-check >/dev/null 2>&1; then
+        echo "a dirty tree was accepted"
+        rm -f .gate-stamp-dirty
+        return 1
+    fi
+    rm -f .gate-stamp-dirty
+}
+
+check_pre_push_refs() {
+    local stub="$tmp/ci-check-stub" zero
+    cat >"$stub" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" > "$tmp/hook-args"
+exit 0
+EOF
+    chmod +x "$stub"
+    zero="$(printf '0%.0s' {1..40})"
+    printf 'refs/tags/v1 %s refs/tags/v1 %s\n' "$(git rev-parse HEAD)" "$zero" \
+        | CI_CHECK_BIN="$stub" githooks/pre-push >/dev/null || return 1
+    printf 'refs/heads/x %s refs/heads/x %s\n' "$zero" "$zero" \
+        | CI_CHECK_BIN="$stub" githooks/pre-push >/dev/null || return 1
+    rm -f "$tmp/hook-args"
+    printf 'refs/heads/x %s refs/heads/x %s\n' "$(git rev-parse HEAD)" "$(git rev-parse HEAD)" \
+        | CI_CHECK_BIN="$stub" githooks/pre-push >/dev/null || return 1
+    [ "$(cat "$tmp/hook-args" 2>/dev/null)" = "--stamped" ] || {
+        echo "the hook did not call ci-check --stamped"
+        return 1
+    }
+}
+
+check "ci-check --list-steps" check_ci_list_steps
+check "ci-check --only docs" check_ci_only_docs
+check "ci-check stamp fixture" check_ci_stamp
+check "pre-push refs" check_pre_push_refs
 
 exit "$fail"

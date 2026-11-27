@@ -16,6 +16,7 @@ Usage:
   ./scripts/build-wiki           write godot/knowledge.json
   ./scripts/build-wiki --check   fail if it is missing or stale
 """
+import argparse
 import hashlib
 import json
 import os
@@ -127,7 +128,12 @@ def payload():
 
 
 def main():
-    check = "--check" in sys.argv[1:]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check", action="store_true",
+        help="fail if godot/knowledge.json is missing or stale",
+    )
+    check = parser.parse_args().check
     notes, version, encoded = payload()
     if check:
         if not os.path.exists(OUT):

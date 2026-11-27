@@ -11,6 +11,10 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+usage() {
+    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+}
+
 app_id=${GPTY_BOT_APP_ID:-5789319}
 repo=${GPTY_BOT_REPO:-godot-pty/gpty}
 key=${GPTY_BOT_PRIVATE_KEY:-}
@@ -18,8 +22,15 @@ check=0
 
 case "${1:-}" in
     --check) check=1 ;;
+    -h | --help)
+        usage
+        exit 0
+        ;;
     "") ;;
-    *) echo "usage: scripts/bot-token [--check]" >&2; exit 2 ;;
+    *)
+        echo "usage: scripts/bot-token [--check]" >&2
+        exit 2
+        ;;
 esac
 
 if [ -z "$key" ]; then

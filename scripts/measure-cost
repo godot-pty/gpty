@@ -134,13 +134,30 @@ readme_stamp() {
     sed -n 's/.*measured on the shipped v\([0-9][0-9.]*\) Linux build.*/\1/p' README.md | head -1
 }
 
+newest_ledger_version() {
+    sed -n 's/.*"version": "\([0-9][0-9.]*\)".*/\1/p' "$ROOT/docs/data/cost-history.json" | sort -V | tail -1
+}
+
+# ── --check: provenance first, before any launch ─────────────────────────
+# The published table may name the last measured build, exactly the rule
+# --stamp applies. Row drift remains the check's measurement signal.
+if [[ "$MODE" == check ]]; then
+    stamp="$(readme_stamp)"
+    newest="$(newest_ledger_version)"
+    [[ -n "$stamp" ]] || die "README.md has no 'measured on the shipped vX.Y.Z Linux build' stamp - the Trade-offs table lost its provenance"
+    [[ -n "$newest" ]] || die "docs/data/cost-history.json has no release versions - the cost ledger lost its records"
+    if [[ "$stamp" != "$newest" ]]; then
+        die "STAMP: README names v$stamp, newest ledger build is v$newest - move the table and the paragraph to the newest recorded build"
+    fi
+fi
+
 # ── --stamp: the cheap half ─────────────────────────────────────────────
 if [[ "$MODE" == stamp ]]; then
     version="$(crate_version)"
     stamp="$(readme_stamp)"
     [[ -n "$version" ]] || die "could not read crates/gpty-cli/Cargo.toml's version"
     [[ -n "$stamp" ]] || die "README.md has no 'measured on the shipped vX.Y.Z Linux build' stamp - the Trade-offs table lost its provenance"
-    newest="$(sed -n 's/.*"version": "\([0-9][0-9.]*\)".*/\1/p' docs/data/cost-history.json | sort -V | tail -1)"
+    newest="$(newest_ledger_version)"
     [[ -n "$newest" ]] || die "docs/data/cost-history.json has no release versions - the cost ledger lost its records"
     if [[ "$stamp" != "$newest" ]]; then
         die "README.md's cost table is stamped v$stamp but the newest ledger build is v$newest: run './scripts/measure-cost --record' (or move the stamp to the newest recorded build) and update every figure the paragraph repeats"
@@ -548,12 +565,6 @@ if [[ -n "$claimed_ratio" ]]; then
         fail=1
     fi
 fi
-stamp="$(readme_stamp)"
-if [[ "$stamp" != "$(crate_version)" ]]; then
-    echo "measure-cost: STAMP: README names v$stamp, workspace is $(crate_version) - move the table and the paragraph to this build" >&2
-    fail=1
-fi
-
 if ((fail)); then
     echo "measure-cost: FAILED - update README.md's Trade-offs table and every figure its paragraph repeats" >&2
     exit 1

@@ -323,9 +323,10 @@ jobs:
       - name: Capture harness loads
         # `godot -s` compiles the entry script before autoloads exist; a
         # project class referenced in tests/bench/ui_capture.gd breaks every
-        # capture while GUT stays green. --list only loads the harness and
-        # needs no display (ui-capture-check itself cannot run in CI).
-        run: ./scripts/ui-capture --list >/dev/null
+        # capture while GUT stays green. --check proves the clean load and its
+        # own negative probe, and needs no display (ui-capture-check itself
+        # cannot run in CI).
+        run: ./scripts/ui-capture --check >/dev/null
 
       - name: Run GUT tests
         # gut-check owns the command and validates the run: GUT exits 0 after
@@ -488,7 +489,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.macos == 'true'
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -519,6 +520,38 @@ jobs:
         env:
           RUSTFLAGS: -Dwarnings
         run: cargo check --workspace --tests --locked
+
+      - name: Install Godot
+        # The pinned editor and SHA512 live in scripts/godot-version.json.
+        run: python3 scripts/install-godot editor --dest "$HOME/godot"
+
+      - name: Build CLI and extension
+        run: cargo build --locked -p gpty-gdext -p gpty
+
+      - name: Install GDExtension library
+        run: |
+          mkdir -p godot/bin
+          cp target/debug/libgpty_gdext.dylib godot/bin/libgpty_gdext.macos.arm64.dylib
+
+      - name: Import project
+        run: godot --headless --path godot --import
+
+      - name: Capture harness loads
+        run: ./scripts/ui-capture --check >/dev/null
+
+      - name: Live pane-API smoke (macOS)
+        run: python3 ./scripts/smoke_pane_api.py
+
+      - name: Run GUT tests
+        # Unit coverage plus the tests that read a platform path: cwd/shell,
+        # the display scale (Retina) and the current screen.
+        run: |
+          ./scripts/gut-check --dir unit
+          ./scripts/gut-check -s test_pane_cwd.gd
+          ./scripts/gut-check -s test_workspace_cwd_trust.gd
+          ./scripts/gut-check -s test_ui_scale.gd
+          ./scripts/gut-check -s test_startup_focus.gd
+          ./scripts/gut-check -s test_renderer_info.gd
 
   # ── Rust formatting ───────────────────────────────────────────────────
   rust-fmt:

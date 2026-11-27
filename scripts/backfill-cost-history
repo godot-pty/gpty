@@ -10,6 +10,7 @@
 #   --force         re-measure a version already in docs/data/cost-history.json
 #                   (default: skip it, so the run is cheap to repeat).
 #   --dry-run       print the plan and exit.
+#   GPTY_COST_LEDGER  ledger path (default docs/data/cost-history.json)
 #
 # An archive with no extracted directory beside it is extracted into a temp dir
 # once, so a release folder that keeps only tarballs still backfills.
@@ -26,7 +27,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-LEDGER="$ROOT/docs/data/cost-history.json"
+LEDGER="${GPTY_COST_LEDGER:-$ROOT/docs/data/cost-history.json}"
 FORCE=0
 DRY=0
 ROOTS=()

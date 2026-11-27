@@ -40,14 +40,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GODOT_BIN="${GODOT:-$(command -v godot || true)}"
-if [[ -z "$GODOT_BIN" ]]; then
-    echo "ui-capture: godot not found on PATH (set GODOT=<path>)" >&2
-    exit 3
-fi
 
+USAGE="usage: ui-capture [--renderer <method>] <state> [<out-dir>] [--perturb <state>] [--unpinned-arrival] [--save <file>] | --audit-focus <state> | --audit-accessibility <state> | --list | --check [--probe <res-path>] | --compare <a.png> <b.png>"
 usage() {
-    echo "usage: ui-capture [--renderer <method>] <state> [<out-dir>] [--perturb <state>] [--unpinned-arrival] [--save <file>] | --audit-focus <state> | --audit-accessibility <state> | --list | --compare <a.png> <b.png>" >&2
+    echo "$USAGE" >&2
     exit 2
+}
+help() {
+    echo "$USAGE"
+    exit 0
 }
 
 RENDERER=""
@@ -82,10 +83,19 @@ OUT=""
 LEFT=""
 RIGHT=""
 SAVE=""
+PROBE=""
+GATE_PROBE_FILES=()
 TEMP_OUT_DIR=""
 case "${1:-}" in
+    -h | --help)
+        help
+        ;;
     --list)
         MODE=list
+        shift
+        ;;
+    --check)
+        MODE=check
         shift
         ;;
     --compare)
@@ -141,11 +151,21 @@ while [[ $# -gt 0 ]]; do
             SAVE="$2"
             shift 2
             ;;
+        --probe)
+            [[ "$MODE" == check && $# -ge 2 ]] || usage
+            PROBE="$2"
+            shift 2
+            ;;
         *)
             usage
             ;;
     esac
 done
+
+if [[ -z "$GODOT_BIN" ]]; then
+    echo "ui-capture: godot not found on PATH (set GODOT=<path>)" >&2
+    exit 3
+fi
 
 if [[ "$MODE" == capture && -z "$OUT" ]]; then
     [[ -n "$SAVE" ]] || usage
@@ -172,6 +192,9 @@ cleanup_capture() {
     gpty_sandbox_cleanup
     if [[ -n "$TEMP_OUT_DIR" ]]; then
         rm -rf "$TEMP_OUT_DIR"
+    fi
+    if (( ${#GATE_PROBE_FILES[@]} )); then
+        rm -f "${GATE_PROBE_FILES[@]}"
     fi
 }
 trap cleanup_capture EXIT
@@ -214,6 +237,83 @@ run_bounded() {
 
 HARNESS=res://tests/bench/ui_capture.gd
 case "$MODE" in
+    check)
+        # The clean load: `-s` compiles the harness through the same script
+        # mode that broke on a typed app class. The engine log is judged, not
+        # only the exit code.
+        CHECK_LOG="$(mktemp)"
+        set +e
+        "$GODOT_BIN" --headless --path "$ROOT/godot" -s "$HARNESS" -- --list >"$CHECK_LOG" 2>&1
+        CHECK_STATUS=$?
+        set -e
+        if grep -qE 'SCRIPT ERROR|Failed to load script' "$CHECK_LOG"; then
+            echo "ui-capture: the capture harness printed a script error — the load is not clean" >&2
+            grep -E 'SCRIPT ERROR|Failed to load script' "$CHECK_LOG" | head -3 >&2
+            rm -f "$CHECK_LOG"
+            exit 1
+        fi
+        if [[ $CHECK_STATUS -ne 0 ]]; then
+            echo "ui-capture: the capture harness did not load" >&2
+            tail -5 "$CHECK_LOG" >&2
+            rm -f "$CHECK_LOG"
+            exit 1
+        fi
+        COUNT="$(grep -cE '^[a-z][a-z0-9-]*$' "$CHECK_LOG" || true)"
+        rm -f "$CHECK_LOG"
+        if [[ "$COUNT" -eq 0 ]]; then
+            echo "ui-capture: the capture harness listed no states" >&2
+            exit 1
+        fi
+        printf 'harness loads (%s states)\n' "$COUNT"
+
+        # The negative proof: a temporary probe with a typed field naming a
+        # project class must fail to compile before the autoloads exist. That
+        # is the trap `--list` exists to catch; if the probe loads clean, the
+        # gate has stopped proving anything.
+        probe_candidates=()
+        if [[ -n "$PROBE" ]]; then
+            probe_candidates=("$PROBE")
+        else
+            probe_candidates=("res://tests/bench/.gate-probe.gd" "res://tests/bench/_gate_probe.gd")
+        fi
+        for candidate in "${probe_candidates[@]}"; do
+            probe_abs="$ROOT/godot/${candidate#res://}"
+            if [[ -z "$PROBE" ]]; then
+                mkdir -p "$(dirname "$probe_abs")"
+                cat >"$probe_abs" <<'EOF'
+extends SceneTree
+var _probe: UiMotion
+func _initialize() -> void:
+	quit(0)
+EOF
+                GATE_PROBE_FILES+=("$probe_abs" "$probe_abs.uid")
+            fi
+            probe_log="$(mktemp)"
+            set +e
+            "$GODOT_BIN" --headless --path "$ROOT/godot" -s "$candidate" >"$probe_log" 2>&1
+            PROBE_STATUS=$?
+            set -e
+            if grep -qE 'SCRIPT ERROR' "$probe_log"; then
+                rm -f "$probe_log"
+                echo "negative probe refused"
+                exit 0
+            fi
+            rm -f "$probe_log"
+            if [[ $PROBE_STATUS -eq 0 ]]; then
+                echo "the load gate no longer detects a typed app class" >&2
+                exit 1
+            fi
+            # Non-zero with no SCRIPT ERROR means the file did not load. The
+            # dotfile can be refused by the engine; try the undotted fallback
+            # once, then fail rather than passing on a missing file.
+            if [[ -z "$PROBE" ]]; then
+                continue
+            fi
+            break
+        done
+        echo "ui-capture: the probe did not load" >&2
+        exit 1
+        ;;
     list)
         # Godot prints its banner and driver lines on stdout too; a state name
         # is the only kind of line this filter keeps, so callers get one name

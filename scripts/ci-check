@@ -2,11 +2,18 @@
 set -euo pipefail
 
 # ── ci-check: Run all CI checks locally in fast-fail order ──────────────
-# Usage: ./scripts/ci-check [--fast | --classify]
-#   --fast       Only fmt + workflow lint + clippy (pre-commit)
-#   --classify   Print the changed set, each path's class, and the suite it
-#                selects; run nothing (answers "why did the gate skip that?")
-#   (no flag)    Full suite: fmt + lint + clippy + tests + GUT + audit
+# Usage: ./scripts/ci-check [--fast | --classify | --only <id[,id]> | --list-steps]
+#                         [--stamped | --stamp | --stamp-check | --stamp-print]
+#   --fast        the pre-commit subset (media through tooling; no app matrix)
+#   --classify    print the changed set and its class; run nothing
+#   --only ...    run only the named steps in canonical order; never stamps
+#   --list-steps  print the step ids and exit
+#   --stamped     skip when the clean-tree stamp matches; else run the full gate
+#   --stamp       run the full gate and write the stamp when the tree is clean
+#   --stamp-check report stamp validity without running the gate
+#   --stamp-print print the current stamp fingerprint (tests)
+#   -h|--help     this text
+#   (no flag)     full suite: every step below
 #
 # A docs-class change runs the docs gates only (workflow lint, docs-check, the
 # two bundles, the catalogue and the ledger) in either mode, because nothing it
@@ -48,14 +55,82 @@ cd "$REPO_ROOT"
 # shellcheck source=scripts/ci-classes.env
 . "$REPO_ROOT/scripts/ci-classes.env"
 
+STEPS=(media fmt workflows docs capabilities secrets theme guards ffi log lock clippy cost tooling cross tests gdext gut smoke audit deny)
+
+usage() {
+    cat <<'EOF'
+Usage: scripts/ci-check [--fast | --classify | --only <id[,id]> | --list-steps]
+                        [--stamped | --stamp | --stamp-check | --stamp-print]
+
+  --fast        run the pre-commit subset (media through tooling)
+  --classify    print the changed set and its class; run nothing
+  --only <ids>  run only these comma-separated steps, in canonical order
+  --list-steps  print one step id per line and exit
+  --stamped     skip when the clean-tree stamp matches; else run the full gate
+  --stamp       run the full gate and write the stamp when the tree is clean
+  --stamp-check report stamp validity without running
+  --stamp-print print the current stamp fingerprint (tests)
+  -h | --help   this text
+
+Steps: media fmt workflows docs capabilities secrets theme guards ffi log lock
+       clippy cost tooling cross tests gdext gut smoke audit deny
+EOF
+}
+
+help() {
+    usage
+    exit 0
+}
+
+die_usage() {
+    usage >&2
+    exit 2
+}
+
 FAST=false
 CLASSIFY=false
-for arg in "$@"; do
-    case "$arg" in
+ONLY=""
+LIST_STEPS=false
+STAMPED=false
+STAMP_AFTER=false
+STAMP_CHECK=false
+STAMP_PRINT=false
+
+while (($#)); do
+    case "$1" in
         --fast) FAST=true ;;
         --classify) CLASSIFY=true ;;
+        --only)
+            [[ $# -ge 2 && -n "$2" ]] || die_usage
+            ONLY="$2"
+            shift
+            ;;
+        --only=*)
+            ONLY="${1#*=}"
+            [[ -n "$ONLY" ]] || die_usage
+            ;;
+        --list-steps) LIST_STEPS=true ;;
+        --stamped) STAMPED=true ;;
+        --stamp) STAMP_AFTER=true ;;
+        --stamp-check) STAMP_CHECK=true ;;
+        --stamp-print) STAMP_PRINT=true ;;
+        -h | --help) help ;;
+        *) echo "ci-check: unknown argument '$1'" >&2; die_usage ;;
     esac
+    shift
 done
+
+if $FAST && [[ -n "$ONLY" ]]; then die_usage; fi
+if [[ -n "$ONLY" ]] && $CLASSIFY; then die_usage; fi
+if { $FAST || [[ -n "$ONLY" ]]; } \
+    && { $STAMPED || $STAMP_AFTER || $STAMP_CHECK || $STAMP_PRINT; }; then
+    die_usage
+fi
+if $STAMP_AFTER && $STAMPED; then die_usage; fi
+if $LIST_STEPS; then
+    printf '%s\n' "${STEPS[@]}"
+    exit 0
+fi
 
 # ── Color helpers ───────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -94,6 +169,69 @@ skip_gate() {
         warn "$1"
     fi
 }
+
+# ── The clean-tree stamp ───────────────────────────────────────────────
+# The pre-push hook runs --stamped: a repeated push of the same clean tree
+# skips the gate, while a changed script, hook, toolchain or tree runs it.
+STAMP_FILE="${CI_CHECK_STAMP:-$(git rev-parse --git-dir 2>/dev/null)/gpty-ci-check.stamp}"
+
+stamp_fingerprint() {
+    printf 'tree=%s\n' "$(git rev-parse HEAD^{tree} 2>/dev/null || echo none)"
+    printf 'ci-check=%s\n' "$(git hash-object scripts/ci-check 2>/dev/null || echo none)"
+    printf 'pre-push=%s\n' "$(git hash-object githooks/pre-push 2>/dev/null || echo none)"
+    printf 'rustc=%s\n' "$(rustc --version 2>/dev/null | head -1 || true)"
+    printf 'cargo=%s\n' "$(cargo --version 2>/dev/null | head -1 || true)"
+    printf 'godot=%s\n' "$(command -v godot >/dev/null 2>&1 && godot --version 2>/dev/null | head -1 || echo none)"
+}
+
+tree_clean() {
+    [ -z "$(git status --porcelain 2>/dev/null)" ]
+}
+
+stamp_valid() {
+    local expected actual
+    expected="$(stamp_fingerprint)"
+    actual="$(cat "$STAMP_FILE" 2>/dev/null || true)"
+    if [[ "$expected" != "$actual" ]]; then
+        diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") \
+            | sed -n '1,8p' >&2 || true
+        return 1
+    fi
+    if [[ "${CI_CHECK_STAMP_IGNORE_DIRTY:-0}" != "1" ]] && ! tree_clean; then
+        echo "the working tree is dirty" >&2
+        return 1
+    fi
+    return 0
+}
+
+write_stamp() {
+    local tmp
+    tmp="$(mktemp "${STAMP_FILE}.XXXXXX")"
+    stamp_fingerprint >"$tmp"
+    mv "$tmp" "$STAMP_FILE"
+}
+
+if $STAMP_PRINT; then
+    stamp_fingerprint
+    exit 0
+fi
+
+if $STAMP_CHECK; then
+    if stamp_valid; then
+        echo "ci-check: stamp is valid"
+        exit 0
+    fi
+    echo "ci-check: stamp is not valid" >&2
+    exit 1
+fi
+
+if $STAMPED; then
+    if stamp_valid; then
+        echo "ci-check: stamp is valid for $(git rev-parse --short HEAD 2>/dev/null || echo this tree); skipping"
+        exit 0
+    fi
+    STAMP_AFTER=true
+fi
 
 # ── Mode banner ────────────────────────────────────────────────────────
 header "ci-check"
@@ -337,237 +475,218 @@ run_tooling_scripts() {
     return 0
 }
 
-# --classify answers "why did the gate run (or skip) that?" without running it.
-if $CLASSIFY; then
-    report_class
-    printf "\n"
-    exit 0
-fi
-
-# A range handed over by the pre-push hook is trustworthy even when `CI` is set
-# in the environment (the variable is exported by many harnesses and by CI
-# itself, and it would otherwise disable the narrowing everywhere); the
-# auto-detected paths are not, because a CI checkout is shallow and detached.
-if [ -z "${CI_CHECK_FULL:-}" ] \
-    && { [ -n "${CI_CHECK_RANGE_FROM:-}" ] || ! $CI_MODE; } \
-    && docs_class_change; then
-    printf "  %bDocs-class change%b — docs gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
-    run_workflow_lint
-    run_docs_check
-    run_capability_check
-    run_roadmap_check
-    run_bundle_check
-    run_cost_stamp
-    printf "\n"
-    if [[ $FAILED -eq 0 ]]; then
-        printf "${GREEN}${BOLD}Docs checks passed. Ready to push.${NC}\n"
-    else
-        printf "${RED}${BOLD}Docs checks failed. Fix before pushing.${NC}\n"
-    fi
-    exit $FAILED
-fi
-
-# A tooling-only range would otherwise buy a 300 s suite that never executes
-# the scripts it changed (no workflow runs them, no Rust test reads them).
-if [ -z "${CI_CHECK_FULL:-}" ] \
-    && { [ -n "${CI_CHECK_RANGE_FROM:-}" ] || ! $CI_MODE; } \
-    && tooling_class_change; then
-    printf "  %bTooling-class change%b — docs, cost and script gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
-    run_docs_check
-    run_bundle_check
-    run_cost_stamp
-    run_tooling_scripts
-    printf "\n"
-    if [[ $FAILED -eq 0 ]]; then
-        printf "${GREEN}${BOLD}Tooling checks passed. Ready to push.${NC}\n"
-    else
-        printf "${RED}${BOLD}Tooling checks failed. Fix before pushing.${NC}\n"
-    fi
-    exit $FAILED
-fi
-
 # ── Media dependencies (before anything compiles the extension) ────────
-# The GDExtension links FFmpeg, and the pinned build is what CI tests. Build
-# it once per prefix (scripts/media-deps caches by version + component hash);
-# a developer with system FFmpeg can still run, but the pinned prefix keeps
-# the local gate equal to CI.
-case "$(uname -s)" in
-    Linux*) MEDIA_PLATFORM="linux" ;;
-    Darwin*) MEDIA_PLATFORM="macos" ;;
-    MINGW*|MSYS*|CYGWIN*) MEDIA_PLATFORM="windows" ;;
-    *) MEDIA_PLATFORM="unknown" ;;
-esac
-case "$(uname -m)" in
-    amd64|x86_64) MEDIA_ARCH="x86_64" ;;
-    arm64|aarch64) MEDIA_ARCH="arm64" ;;
-    *) MEDIA_ARCH="unknown" ;;
-esac
-MEDIA_ENV="$REPO_ROOT/dist/ffmpeg/$MEDIA_PLATFORM-$MEDIA_ARCH/env.sh"
-header "media dependencies"
-# The script is a no-op when the stamp matches (version + components + asm);
-# running it unconditionally is what notices a changed component list.
-if "$REPO_ROOT/scripts/media-deps"; then
-    pass "media dependencies"
-else
-    fail "media dependencies — run './scripts/media-deps'"
-    check_failed
-    # Let the checks below fail with the real compiler error if the system
-    # FFmpeg can satisfy them; the gate already recorded failure.
-fi
-if [ -f "$MEDIA_ENV" ]; then
-    # shellcheck disable=SC1090
-    source "$MEDIA_ENV"
-fi
+MEDIA_READY=0
+step_media() {
+    if ((MEDIA_READY)); then
+        return 0
+    fi
+    MEDIA_READY=1
+    # The GDExtension links FFmpeg, and the pinned build is what CI tests. Build
+    # it once per prefix (scripts/media-deps caches by version + component hash);
+    # a developer with system FFmpeg can still run, but the pinned prefix keeps
+    # the local gate equal to CI.
+    case "$(uname -s)" in
+        Linux*) MEDIA_PLATFORM="linux" ;;
+        Darwin*) MEDIA_PLATFORM="macos" ;;
+        MINGW*|MSYS*|CYGWIN*) MEDIA_PLATFORM="windows" ;;
+        *) MEDIA_PLATFORM="unknown" ;;
+    esac
+    case "$(uname -m)" in
+        amd64|x86_64) MEDIA_ARCH="x86_64" ;;
+        arm64|aarch64) MEDIA_ARCH="arm64" ;;
+        *) MEDIA_ARCH="unknown" ;;
+    esac
+    MEDIA_ENV="$REPO_ROOT/dist/ffmpeg/$MEDIA_PLATFORM-$MEDIA_ARCH/env.sh"
+    header "media dependencies"
+    # The script is a no-op when the stamp matches (version + components + asm);
+    # running it unconditionally is what notices a changed component list.
+    if "$REPO_ROOT/scripts/media-deps"; then
+        pass "media dependencies"
+    else
+        fail "media dependencies — run './scripts/media-deps'"
+        check_failed
+        # Let the checks below fail with the real compiler error if the system
+        # FFmpeg can satisfy them; the gate already recorded failure.
+    fi
+    if [ -f "$MEDIA_ENV" ]; then
+        # shellcheck disable=SC1090
+        source "$MEDIA_ENV"
+    fi
+}
+
+media_ready() {
+    ((MEDIA_READY)) || step_media
+}
 
 # ── Step 1: cargo fmt ──────────────────────────────────────────────────
-header "cargo fmt --check"
-if cargo fmt --all -- --check 2>&1; then
-    pass "rustfmt"
-else
-    fail "rustfmt — run 'cargo fmt --all' to fix"
-    check_failed
-fi
+step_fmt() {
+    header "cargo fmt --check"
+    if cargo fmt --all -- --check 2>&1; then
+        pass "rustfmt"
+    else
+        fail "rustfmt — run 'cargo fmt --all' to fix"
+        check_failed
+    fi
+}
 
 # ── Step 2: Workflow YAML lint ─────────────────────────────────────────
-run_workflow_lint
+step_workflows() {
+    run_workflow_lint
+}
 
 # ── Docs: markdown links, roadmap tables, split pages ──────────────────
-run_docs_check
-run_capability_check
-run_roadmap_check
+step_docs() {
+    run_docs_check
+    run_roadmap_check
 
-# ── MCP registry descriptor ────────────────────────────────────────────
-# server.json is the claim the registry publishes: the package it names, the
-# version it pins and the arguments that start the server. A typo that the
-# registry only rejects at release time fails here instead.
-header "mcp-registry"
-if MCP_OUT="$(python3 scripts/mcp-registry check 2>&1)"; then
-    pass "mcp-registry"
-else
-    fail "mcp-registry"
-    detail "$MCP_OUT"
-    check_failed
-fi
+    # server.json is the claim the registry publishes: the package it names, the
+    # version it pins and the arguments that start the server. A typo that the
+    # registry only rejects at release time fails here instead.
+    header "mcp-registry"
+    if MCP_OUT="$(python3 scripts/mcp-registry check 2>&1)"; then
+        pass "mcp-registry"
+    else
+        fail "mcp-registry"
+        detail "$MCP_OUT"
+        check_failed
+    fi
 
-# ── Knowledge and documentation bundles ────────────────────────────────
-# The vault and the Markdown reachable from README are the sources;
-# godot/knowledge.json and godot/docs.json are what release builds read. A
-# stale bundle ships old text, so it fails here rather than at export.
-run_bundle_check
+    # The vault and the Markdown reachable from README are the sources;
+    # godot/knowledge.json and godot/docs.json are what release builds read. A
+    # stale bundle ships old text, so it fails here rather than at export.
+    run_bundle_check
+}
+
+# ── Step 2.5: capability catalogue ─────────────────────────────────────
+step_capabilities() {
+    run_capability_check
+}
 
 # ── Step 2.9: workspace lockfile drift ─────────────────────────────────
-# Clippy/build/test below can re-resolve and rewrite a stale Cargo.lock, which
-# would make the audit read a graph that is not the one committed. Check the
-# committed lock before the first command that can touch it.
-header "Cargo.lock"
-if cargo metadata --locked --format-version 1 >/dev/null 2>&1; then
-    pass "Cargo.lock in sync"
-else
-    fail "Cargo.lock is out of sync — run: cargo metadata --format-version 1"
-    check_failed
-fi
+step_lock() {
+    # Clippy/build/test below can re-resolve and rewrite a stale Cargo.lock, which
+    # would make the audit read a graph that is not the one committed. Check the
+    # committed lock before the first command that can touch it.
+    header "Cargo.lock"
+    if cargo metadata --locked --format-version 1 >/dev/null 2>&1; then
+        pass "Cargo.lock in sync"
+    else
+        fail "Cargo.lock is out of sync — run: cargo metadata --format-version 1"
+        check_failed
+    fi
+}
 
 # ── Step 3: cargo clippy ───────────────────────────────────────────────
-header "cargo clippy"
-if cargo clippy --workspace --locked -- -D warnings 2>&1; then
-    pass "clippy"
-else
-    fail "clippy"
-    check_failed
-fi
+step_clippy() {
+    media_ready
+    header "cargo clippy"
+    if cargo clippy --workspace --locked -- -D warnings 2>&1; then
+        pass "clippy"
+    else
+        fail "clippy"
+        check_failed
+    fi
+}
 
 # ── Step 3.1: GDExtension surface ──────────────────────────────────────
-# A renamed or removed #[func] does not fail at GDScript parse time: the call
-# breaks at runtime, in whichever pane exercises it, often visible only in a
-# log line. This cross-checks every GDScript call on a GDExtension handle
-# against the exported surface (name and arity). Static, no build.
-header "GDExtension surface"
-if ./scripts/check-ffi-surface 2>&1; then
-    pass "GDExtension surface"
-else
-    fail "GDExtension surface — a GDScript call does not match any #[func]"
-    check_failed
-fi
+step_ffi() {
+    # A renamed or removed #[func] does not fail at GDScript parse time: the call
+    # breaks at runtime, in whichever pane exercises it, often visible only in a
+    # log line. This cross-checks every GDScript call on a GDExtension handle
+    # against the exported surface (name and arity). Static, no build.
+    header "GDExtension surface"
+    if ./scripts/check-ffi-surface 2>&1; then
+        pass "GDExtension surface"
+    else
+        fail "GDExtension surface — a GDScript call does not match any #[func]"
+        check_failed
+    fi
+}
 
 # ── Step 3.2: Log hygiene ──────────────────────────────────────────────
-# What a program writes is not log material (AGENTS.md, SECURITY.md): a pane's
-# output, a capture, injected text or a backend's stderr can quote a prompt or a
-# credential, and `warn` is the level the GDExtension forwards into Godot's
-# console and its log file. Static, no build.
-header "log hygiene"
-if ./scripts/check-log-hygiene 2>&1; then
-    pass "log hygiene"
-else
-    fail "log hygiene — a log call formats program input/output"
-    check_failed
-fi
+step_log() {
+    # What a program writes is not log material (AGENTS.md, SECURITY.md): a pane's
+    # output, a capture, injected text or a backend's stderr can quote a prompt or a
+    # credential, and `warn` is the level the GDExtension forwards into Godot's
+    # console and its log file. Static, no build.
+    header "log hygiene"
+    if ./scripts/check-log-hygiene 2>&1; then
+        pass "log hygiene"
+    else
+        fail "log hygiene — a log call formats program input/output"
+        check_failed
+    fi
+}
 
 # ── Step 3.3: Theme tokens ─────────────────────────────────────────────
-# The light theme holds only because nothing caches a palette colour or pins one
-# in a widget override (docs/content/docs/agents/gdscript.md). A cached copy
-# compiles, passes the suite, and silently keeps the mode it was built under, so
-# the rule is a gate. Static, no build.
-header "theme tokens"
-if ./scripts/check-theme-tokens 2>&1; then
-    pass "theme tokens"
-else
-    fail "theme tokens — a palette colour is cached or overridden"
-    check_failed
-fi
+step_theme() {
+    # The light theme holds only because nothing caches a palette colour or pins one
+    # in a widget override (docs/content/docs/agents/gdscript.md). A cached copy
+    # compiles, passes the suite, and silently keeps the mode it was built under, so
+    # the rule is a gate. Static, no build.
+    header "theme tokens"
+    if ./scripts/check-theme-tokens 2>&1; then
+        pass "theme tokens"
+    else
+        fail "theme tokens — a palette colour is cached or overridden"
+        check_failed
+    fi
+}
 
 # ── Step 3.3b: Test guards ─────────────────────────────────────────────
-# A test that indexes a call's result (`_list_meta(pane)[0]`) cannot guard the
-# index in place: the `Out of bounds` raises before any `is_empty()` runs, and
-# three such reads turned a windows-smoke run into "not trustworthy" with the
-# rest of the suite unrun. `gut-check` now judges such a run instead of killing
-# it, and this gate keeps the shape from coming back. Static, no build.
-header "test guards"
-if ./scripts/check-test-guards 2>&1; then
-    pass "test guards"
-else
-    fail "test guards — a test indexes a call's list without a guard"
-    check_failed
-fi
+step_guards() {
+    # A test that indexes a call's result (`_list_meta(pane)[0]`) cannot guard the
+    # index in place: the `Out of bounds` raises before any `is_empty()` runs, and
+    # three such reads turned a windows-smoke run into "not trustworthy" with the
+    # rest of the suite unrun. `gut-check` now judges such a run instead of killing
+    # it, and this gate keeps the shape from coming back. Static, no build.
+    header "test guards"
+    if ./scripts/check-test-guards 2>&1; then
+        pass "test guards"
+    else
+        fail "test guards — a test indexes a call's list without a guard"
+        check_failed
+    fi
+}
 
 # ── Step 3.4: Secret scan ──────────────────────────────────────────────
-# The values that must never be committed are the ones a pattern can name:
-# private keys, cloud access key ids and provider token prefixes. The full
-# history scan is gitleaks in CI; this catches the index before the commit.
-header "secret scan"
-if ./scripts/check-secrets 2>&1; then
-    pass "secret scan"
-else
-    fail "secret scan — a tracked file matches a known credential format"
-    check_failed
-fi
+step_secrets() {
+    # The values that must never be committed are the ones a pattern can name:
+    # private keys, cloud access key ids and provider token prefixes. The full
+    # history scan is gitleaks in CI; this catches the index before the commit.
+    header "secret scan"
+    if ./scripts/check-secrets 2>&1; then
+        pass "secret scan"
+    else
+        fail "secret scan — a tracked file matches a known credential format"
+        check_failed
+    fi
+}
 
 # ── Step 3.5: README cost table provenance ─────────────────────────────
-# The README's Trade-offs table names the build it was measured on, and a
-# release bumps the crate version, so a table still quoting the previous
-# release is the failure mode this catches without a GPU. The measurement
-# itself needs a real renderer and is `scripts/measure-cost --check` at release
-# time (skill://release); this is the reminder that it is due.
-run_cost_stamp
-run_tooling_scripts
+step_cost() {
+    # The README's Trade-offs table names the build it was measured on, and a
+    # release bumps the crate version, so a table still quoting the previous
+    # release is the failure mode this catches without a GPU. The measurement
+    # itself needs a real renderer and is `scripts/measure-cost --check` at release
+    # time (skill://release); this is the reminder that it is due.
+    run_cost_stamp
+}
 
-# ── Fast mode stops here ───────────────────────────────────────────────
-if $FAST; then
-    printf "\n"
-    if [[ $FAILED -eq 0 ]]; then
-        printf "${GREEN}${BOLD}All fast checks passed.${NC}\n"
-    else
-        printf "${RED}${BOLD}Fast checks failed.${NC}\n"
-    fi
-    exit $FAILED
-fi
+step_tooling() {
+    run_tooling_scripts
+}
 
 # ── Step 3.5: Windows cross-check ─────────────────────────────────────
-# Release parity check: release.yml builds on windows-latest; CI job
-# rust-windows enforces this in the cloud. Locally it runs when the
-# toolchain is available, otherwise it is skipped with a hint. Mirrors
-# the CI job's RUSTFLAGS=-Dwarnings so Windows-only dead code fails here
-# too instead of surfacing first on GitHub.
-header "windows cross-check"
+step_cross() {
+    media_ready
+    # Release parity check: release.yml builds on windows-latest; CI job
+    # rust-windows enforces this in the cloud. Locally it runs when the
+    # toolchain is available, otherwise it is skipped with a hint. Mirrors
+    # the CI job's RUSTFLAGS=-Dwarnings so Windows-only dead code fails here
+    # too instead of surfacing first on GitHub.
+    header "windows cross-check"
 WIN_TARGET="x86_64-pc-windows-msvc"
 # The FFmpeg-backed crates are part of the check, but a `cargo check` never
 # links: the host's media prefix answers pkg-config for the Windows target
@@ -650,16 +769,19 @@ else
     detail "$CRATE_OUT"
     check_failed
 fi
+}
 
 # ── Step 4: cargo test ─────────────────────────────────────────────────
-# Both passes run under an empty TMPDIR so the suite's temp discipline is
-# measured, not assumed: a test that writes outside its guard leaves the file
-# here, and the check below fails the run on it. `std::env::temp_dir()` honours
-# TMPDIR, so every artifact a test creates lands inside this directory.
-TEMP_PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gpty-gate-tmp.XXXXXX")"
-# An interrupted run still cleans up: the probe directory is not an artifact.
-trap 'rm -rf "$TEMP_PROBE_DIR"' EXIT
-header "cargo test"
+step_tests() {
+    media_ready
+    # Both passes run under an empty TMPDIR so the suite's temp discipline is
+    # measured, not assumed: a test that writes outside its guard leaves the file
+    # here, and the check below fails the run on it. `std::env::temp_dir()` honours
+    # TMPDIR, so every artifact a test creates lands inside this directory.
+    TEMP_PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gpty-gate-tmp.XXXXXX")"
+    # An interrupted run still cleans up: the probe directory is not an artifact.
+    trap 'rm -rf "$TEMP_PROBE_DIR"' EXIT
+    header "cargo test"
 if TMPDIR="$TEMP_PROBE_DIR" cargo test --workspace --locked -- --test-threads=1 2>&1; then
     pass "cargo test"
 else
@@ -709,13 +831,22 @@ if command -v node >/dev/null 2>&1; then
 else
     skip_gate "node not found — skipping OMP extension tests"
 fi
+}
 
-# ── Step 5: GUT (GDScript) tests ───────────────────────────────────────
-header "GUT tests"
-GODOT="$(command -v godot 2>/dev/null || echo "")"
-if [[ -z "$GODOT" ]]; then
-    skip_gate "godot not found — skipping GUT tests"
-else
+# ── Step 5: Godot runtime, GUT and pane-API smoke ─────────────────────
+GODOT_READY=0
+prepare_godot_runtime() {
+    if ((GODOT_READY)); then
+        return 0
+    fi
+    GODOT_READY=1
+    media_ready
+    header "GDExtension runtime"
+    GODOT="$(command -v godot 2>/dev/null || echo "")"
+    if [[ -z "$GODOT" ]]; then
+        skip_gate "godot not found — skipping the Godot tests"
+        return 0
+    fi
     echo "  Building GDExtension..."
     cargo build -p gpty-gdext 2>&1 || { fail "gdext build"; check_failed; }
     echo "  Installing GDExtension library..."
@@ -729,16 +860,26 @@ else
     # `godot -s` compiles the entry script's dependencies before the autoloads
     # exist. A project class named in the capture harness (a typed field, an
     # `is` check) therefore breaks every capture while GUT stays green - and
-    # `ui-capture-check` cannot run here without a display. `--list` needs no
-    # display and loads the harness through the same compile, so it is the
+    # `ui-capture-check` cannot run here without a display. `--check` needs no
+    # display and loads the harness plus its own negative probe, so it is the
     # gate for that trap.
     echo "  Loading capture harness..."
-    if GODOT="$GODOT" ./scripts/ui-capture --list >/dev/null 2>&1; then
+    if GODOT="$GODOT" ./scripts/ui-capture --check >/dev/null 2>&1; then
         pass "capture harness loads"
     else
         fail "capture harness loads (a class reference in godot/tests/bench/ui_capture.gd loads before autoloads; see testing.md)"
         check_failed
     fi
+}
+
+step_gdext() {
+    prepare_godot_runtime
+}
+
+step_gut() {
+    prepare_godot_runtime
+    [[ -n "$GODOT" ]] || return 0
+    header "GUT tests"
     echo "  Running GUT tests..."
     # gut-check owns the GUT command and validates the run (a parse error makes
     # GUT abort after a handful of scripts and still exit 0).
@@ -748,15 +889,16 @@ else
         fail "GUT tests"
         check_failed
     fi
-fi
+}
 
-# ── Step 5.5: Live pane-API smoke ─────────────────────────────────────
-header "pane-API smoke"
-if [[ -z "$GODOT" ]]; then
-    skip_gate "godot not found — skipping smoke test"
-elif ! command -v python3 >/dev/null 2>&1; then
-    skip_gate "python3 not found — skipping smoke test"
-else
+step_smoke() {
+    prepare_godot_runtime
+    [[ -n "$GODOT" ]] || return 0
+    header "pane-API smoke"
+    if ! command -v python3 >/dev/null 2>&1; then
+        skip_gate "python3 not found — skipping smoke test"
+        return 0
+    fi
     echo "  Running live pane-API smoke (headless GUI)..."
     # One harness for every platform: it drives the same flow through a Unix
     # socket here and a named pipe on Windows (see the windows-smoke CI job).
@@ -766,69 +908,126 @@ else
         fail "pane-API smoke"
         check_failed
     fi
-fi
+}
 
 # ── Step 6: cargo audit ────────────────────────────────────────────────
-header "cargo audit"
-
-if command -v cargo-audit &>/dev/null; then
-    # cargo-audit needs a lockfile with exact versions; create one only if
-    # missing. Never regenerate over an existing file: generate-lockfile
-    # re-resolves to latest compatible versions and silently rewrites the
-    # repo's pinned Cargo.lock on every run.
-    [ -f Cargo.lock ] || cargo generate-lockfile 2>&1 || true
-    # Same flags as CI (.github/workflows/ci.yml). `--deny warnings` matters:
-    # plain `cargo audit` reports an `unsound` advisory as an allowed warning
-    # and exits 0, so this gate passed on the change that turned CI red
-    # (RUSTSEC-2026-0386, tokio). A warning CI would reject must fail here too.
-    if cargo audit --deny warnings 2>&1; then
-        pass "cargo audit"
+step_audit() {
+    header "cargo audit"
+    if command -v cargo-audit &>/dev/null; then
+        # cargo-audit needs a lockfile with exact versions; create one only if
+        # missing. Never regenerate over an existing file: generate-lockfile
+        # re-resolves to latest compatible versions and silently rewrites the
+        # repo's pinned Cargo.lock on every run.
+        [ -f Cargo.lock ] || cargo generate-lockfile 2>&1 || true
+        # Same flags as CI (.github/workflows/ci.yml). `--deny warnings` matters:
+        # plain `cargo audit` reports an `unsound` advisory as an allowed warning
+        # and exits 0, so this gate passed on the change that turned CI red
+        # (RUSTSEC-2026-0386, tokio). A warning CI would reject must fail here too.
+        if cargo audit --deny warnings 2>&1; then
+            pass "cargo audit"
+        else
+            fail "cargo audit"
+            check_failed
+        fi
+        # The fuzz workspace pins its own lockfile and sits outside this workspace,
+        # so the audit above never reads it - but GitHub's dependency graph does,
+        # and a stale `fuzz/Cargo.lock` is how Scorecard's Vulnerabilities check
+        # found RUSTSEC-2026-0459 (`libsqlite3-sys` 0.28.0) while this gate was
+        # green. `--locked` reports drift instead of re-resolving the file.
+        if cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml >/dev/null 2>&1; then
+            pass "fuzz lockfile in sync"
+        else
+            fail "fuzz lockfile in sync — run: cargo metadata --format-version 1 --manifest-path fuzz/Cargo.toml"
+            check_failed
+        fi
+        if cargo audit --file fuzz/Cargo.lock --deny warnings 2>&1; then
+            pass "cargo audit (fuzz)"
+        else
+            fail "cargo audit (fuzz)"
+            check_failed
+        fi
     else
-        fail "cargo audit"
-        check_failed
+        skip_gate "cargo-audit not installed — run: cargo install cargo-audit"
     fi
-    # The fuzz workspace pins its own lockfile and sits outside this workspace,
-    # so the audit above never reads it - but GitHub's dependency graph does,
-    # and a stale `fuzz/Cargo.lock` is how Scorecard's Vulnerabilities check
-    # found RUSTSEC-2026-0459 (`libsqlite3-sys` 0.28.0) while this gate was
-    # green. `--locked` reports drift instead of re-resolving the file.
-    if cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml >/dev/null 2>&1; then
-        pass "fuzz lockfile in sync"
-    else
-        fail "fuzz lockfile in sync — run: cargo metadata --format-version 1 --manifest-path fuzz/Cargo.toml"
-        check_failed
-    fi
-    if cargo audit --file fuzz/Cargo.lock --deny warnings 2>&1; then
-        pass "cargo audit (fuzz)"
-    else
-        fail "cargo audit (fuzz)"
-        check_failed
-    fi
-else
-    skip_gate "cargo-audit not installed — run: cargo install cargo-audit"
-fi
+}
 
 # ── Step 6.1: cargo deny ───────────────────────────────────────────────
-header "cargo deny"
-
-if command -v cargo-deny &>/dev/null; then
-    # deny.toml owns the policy: licence allow-list + named exceptions,
-    # crates.io-only sources, yanked = deny, duplicate versions as warnings,
-    # and [graph] all-features so the graph matches CI's.
-    if cargo deny check 2>&1; then
-        pass "cargo deny"
+step_deny() {
+    header "cargo deny"
+    if command -v cargo-deny &>/dev/null; then
+        # deny.toml owns the policy: licence allow-list + named exceptions,
+        # crates.io-only sources, yanked = deny, duplicate versions denied (dev
+        # edges included) with named upstream-pin skips, and [graph]
+        # all-features so the graph matches CI's.
+        if cargo deny check 2>&1; then
+            pass "cargo deny"
+        else
+            fail "cargo deny"
+            check_failed
+        fi
     else
-        fail "cargo deny"
-        check_failed
+        skip_gate "cargo-deny not installed — run: cargo install cargo-deny --locked"
     fi
+}
+
+# ── Selection ──────────────────────────────────────────────────────────
+SELECTED=()
+if [[ -n "$ONLY" ]]; then
+    IFS=',' read -r -a requested <<<"$ONLY"
+    for id in "${requested[@]}"; do
+        case " ${STEPS[*]} " in
+            *" $id "*) ;;
+            *)
+                echo "ci-check: unknown step '$id' (see --list-steps)" >&2
+                exit 2
+                ;;
+        esac
+    done
+    for id in "${STEPS[@]}"; do
+        for want in "${requested[@]}"; do
+            if [[ "$id" == "$want" ]]; then
+                SELECTED+=("$id")
+            fi
+        done
+    done
+elif $CLASSIFY; then
+    report_class
+    printf "\n"
+    exit 0
+elif $STAMP_AFTER; then
+    SELECTED=("${STEPS[@]}")
+elif [ -z "${CI_CHECK_FULL:-}" ] \
+    && { [ -n "${CI_CHECK_RANGE_FROM:-}" ] || ! $CI_MODE; } \
+    && docs_class_change; then
+    printf "  %bDocs-class change%b — docs gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
+    SELECTED=(workflows docs capabilities cost)
+elif [ -z "${CI_CHECK_FULL:-}" ] \
+    && { [ -n "${CI_CHECK_RANGE_FROM:-}" ] || ! $CI_MODE; } \
+    && tooling_class_change; then
+    printf "  %bTooling-class change%b — docs, cost and script gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
+    SELECTED=(docs cost tooling)
+elif $FAST; then
+    SELECTED=(media fmt workflows docs capabilities secrets theme guards ffi log lock clippy cost tooling)
 else
-    skip_gate "cargo-deny not installed — run: cargo install cargo-deny --locked"
+    SELECTED=("${STEPS[@]}")
 fi
+
+for id in "${SELECTED[@]}"; do
+    "step_$id"
+done
 
 # ── Summary ────────────────────────────────────────────────────────────
 printf "\n"
 if [[ $FAILED -eq 0 ]]; then
     printf "${GREEN}${BOLD}All checks passed. Ready to push.${NC}\n"
+    if $STAMP_AFTER; then
+        if tree_clean; then
+            write_stamp
+            echo "ci-check: wrote the clean-tree stamp for $(git rev-parse --short HEAD 2>/dev/null || echo this tree)"
+        else
+            echo "ci-check: not stamped (working tree is dirty)"
+        fi
+    fi
 else
     printf "${RED}${BOLD}Some checks failed. Fix before pushing.${NC}\n"
 fi
