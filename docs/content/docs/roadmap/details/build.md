@@ -2890,3 +2890,22 @@ the workflow commit (saying why). `pr selftest` builds a bare remote and covers 
 behind and empty; the dry run stays offline-capable.
 
 Commits: 46c80ea, 3d4b544
+
+## BUILD-140
+
+**GUT's intermediate-state assertions race the host's frame pace** - found 2026-11-27 on PR #73 and
+the three dependabot PRs: `test_scroll_hints.gd::test_a_chevron_fades_in_and_out` failed on Windows
+with `[1.0] expected to be < than [1.0]` (`it arrives from transparent`, sampled after one frame
+whose delta exceeded the fade),
+`test_concept_graph_editor.gd::test_frame_all_eases_and_off_lands_on_the_same_transform` failed on
+Windows with `the camera moved off its start` (the tween's first step landed after the single
+awaited frame), and `test_wiki_pane.gd::test_a_dragged_node_keeps_its_place_across_a_build` failed
+on macOS with `[683.804138183594] expected to be < than [1.0]` (the drag was placed into a live
+`RigidBody3D` simulation, and the extra physics ticks before the rebuild moved the body). None of
+the four PRs changed GDScript, so the assertions depended on the runner, not the code under test.
+
+Fix: sample an arrival's start before the first frame (`UiMotion.arrive` sets it synchronously),
+wait on wall time rather than a frame count before asserting an ease advanced, and settle a 3D
+graph's simulation (`_settle_now`) after placing a dragged body so the physics is not a second
+author of the position. Tests: the three named tests, in the full suite on Linux and `--dir unit` on
+macOS.

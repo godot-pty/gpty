@@ -696,7 +696,7 @@ def cmd_audit(args):
             else:
                 recorded.append((where, h))
     if recorded:
-        if git('rev-parse', '--is-shallow-repository').strip() == 'true':
+        if not args.hashes and git('rev-parse', '--is-shallow-repository').strip() == 'true':
             print('roadmap audit: shallow clone — commit hashes not checked')
         else:
             commits = git('rev-list', '--all').split()
@@ -914,20 +914,26 @@ def cmd_selftest(args):
             fixture(path, **kwargs)
             return path
 
+        # The hash half is skipped on a shallow clone (the CI checkout), and the
+        # fixture's real-sha/deadbeef pair is still decidable there: --hashes
+        # makes the selftest assert the same thing in every checkout.
+        def audit(path):
+            return child(path, 'audit', '--hashes')
+
         real = git('rev-parse', '--short', 'HEAD').strip()
-        expect(child(audit_tree('clean', status='✅', commits=f'Commits: {real}'), 'audit'),
+        expect(audit(audit_tree('clean', status='✅', commits=f'Commits: {real}')),
                0, 'roadmap audit: ok', 'audit accepts a clean ledger')
-        expect(child(audit_tree('hash', status='✅', commits='Commits: deadbeef'), 'audit'),
+        expect(audit(audit_tree('hash', status='✅', commits='Commits: deadbeef')),
                1, 'is not reachable from any ref', 'audit refuses an unknown commit')
         long_tree = audit_tree('long')
         long_detail = os.path.join(long_tree, 'docs/content/docs/roadmap/details/test.md')
         write(long_detail, read(long_detail) + 'x' * 800 + '\n')
-        expect(child(long_tree, 'audit'), 1, 'line is 800 bytes (cap 768)',
+        expect(audit(long_tree), 1, 'line is 800 bytes (cap 768)',
                'audit refuses an over-long line')
-        expect(child(audit_tree('cite', body1='**First fixture row** - cites TEST-9.'),
-                     'audit'), 1, 'TEST-9 is not a roadmap row',
+        expect(audit(audit_tree('cite', body1='**First fixture row** - cites TEST-9.')),
+               1, 'TEST-9 is not a roadmap row',
                'audit refuses an unallocated ID in prose')
-        expect(child(audit_tree('reason', status='🚫'), 'audit'), 1, 'with no reason',
+        expect(audit(audit_tree('reason', status='🚫')), 1, 'with no reason',
                'audit refuses a dropped row without a reason')
 
         # add / move / record on their own trees, so the main fixture's closes
@@ -1014,11 +1020,11 @@ def cmd_selftest(args):
         fixture(stale)
         stale_roadmap = os.path.join(stale, 'ROADMAP.md')
         write(stale_roadmap, read(stale_roadmap).replace(', 2 open', ', 9 open'))
-        expect(child(stale, 'audit'), 1, 'says 9 open',
+        expect(audit(stale), 1, 'says 9 open',
                'audit refuses a stale open count')
         expect(child(stale, 'stats', '--write'), 0, 'chain counts updated',
                'stats --write repairs the count')
-        expect(child(stale, 'audit'), 0, 'roadmap audit: ok',
+        expect(audit(stale), 0, 'roadmap audit: ok',
                'the repaired count passes the audit')
         expect(child(stale, 'stats', '--write'), 0, 'already current',
                'stats --write is idempotent')
@@ -1094,6 +1100,8 @@ def main():
                    help='list the open rows instead of failing on them')
     p.set_defaults(func=cmd_release_check)
     p = sub.add_parser('audit', help='check hashes, line caps, cited IDs and reasons')
+    p.add_argument('--hashes', action='store_true',
+                   help='check commit hashes even in a shallow clone (fixtures)')
     p.set_defaults(func=cmd_audit)
     p = sub.add_parser('selftest', help='exercise the commands on a fixture (ci-check)')
     p.set_defaults(func=cmd_selftest)

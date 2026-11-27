@@ -208,10 +208,12 @@ func test_a_chevron_fades_in_and_out():
 	var bar := scroll.get_v_scroll_bar()
 	var hints := ScrollHints.attach(_root, scroll)
 	hints.bind_bar(bar)
-	await get_tree().process_frame
 	var button := hints.bottom_button
 	assert_true(button.visible, "the direction shows")
+	# Sample the ramp before a frame can finish it: `arrive` sets the start alpha
+	# synchronously, and a slow runner's first frame can be longer than the fade.
 	assert_lt(button.modulate.a, 1.0, "it arrives from transparent")
+	await get_tree().process_frame
 	var settled: Vector2 = button.position
 	var settled_size: Vector2 = button.size
 	await wait_seconds(0.2)

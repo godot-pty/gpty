@@ -238,7 +238,9 @@ func test_frame_all_eases_and_off_lands_on_the_same_transform():
 	var start_zoom: float = _editor._graph.zoom
 	var start_scroll: Vector2 = _editor._graph.scroll_offset
 	_editor._frame_all()
-	await wait_frames(1)
+	# Two frames, not one: on Windows the tween's first step landed after the
+	# frame the test awaited, so a single frame could not prove the ease moved.
+	await wait_frames(2)
 	assert_not_null(_editor._canvas_tween, "the frame eases")
 	var mid_zoom: float = _editor._graph.zoom
 	var mid_scroll: Vector2 = _editor._graph.scroll_offset

@@ -2122,7 +2122,12 @@ func test_a_dragged_node_keeps_its_place_across_a_build():
 	await _open_graph(pane)
 
 	if pane._graph_view is VaultGraph3D:
-		(pane._graph_view as VaultGraph3D)._place_body("a.md", Vector2(11, 22))
+		var graph := pane._graph_view as VaultGraph3D
+		graph._place_body("a.md", Vector2(11, 22))
+		# A finished drag settles the simulation. Without this the physics keeps
+		# running between the place and the second build, and a slow runner's
+		# extra ticks move the body out from under the assertion.
+		graph._settle_now()
 	else:
 		pane._graph_view.positions["a.md"] = Vector2(11, 22)
 	await _open_graph(pane)
