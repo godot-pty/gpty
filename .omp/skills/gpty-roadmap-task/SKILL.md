@@ -17,6 +17,8 @@ The roadmap is an index plus per-area evidence pages:
 - **Rows go stale.** They are written on one build and implemented days later: reproduce the claim on the current build before writing code, and re-locate any `file:line` (numbers drift). The fidelity probe pass found rows already fixed, half-fixed, and describing code that had moved.
 - Already fixed? Close it with the evidence. Narrowed? Rewrite the detail section to what remains. Obsolete or superseded? Mark it `🚫` and say why in the detail; declined by decision? Mark it `❌` and say why. Never leave a dead row open and never delete it. Never add a "corrections" row.
 
+**Handing a row to another agent:** the plan names signatures, edge cases, exact commands and the acceptance check - never code bodies; the reader has the repository, and a pasted sketch goes stale.
+
 ## 2. Read the guides the area touches
 
 AGENTS.md's table: `testing.md`, `rust.md`, `gdscript.md`, `concept-capture.md`, `inspector-reasoning-omp.md`, `plugins.md`, `security.md`, `pitfalls.md` (and `repo-map.md` for which module owns a behaviour). `security.md` is mandatory for IPC, PTY, filesystem, plugins, networking or secrets — read before editing, not after.

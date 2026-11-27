@@ -36,6 +36,7 @@ Commits: 1a2b3c4, 5d6e7f8
 - **The queue is the priority:** within a release, row order *is* the priority, and the first unchecked row (⬜) in the earliest unfinished release is the answer to "what's next" (`./scripts/roadmap next`). `next --limit N` lists more, `--chain PAGE` and `--area AREA` narrow the same query, and `--json` prints a list for a tool to read.
 - **Open counts are data, not prose:** `ROADMAP.md`'s release-chain list carries each page's open count (`- planned, 114 open`). `./scripts/roadmap stats --write` writes it, `add`, `move` and `close` refresh it, and `./scripts/roadmap audit` fails a stale line.
 - **Release chain order:** open the chain pages in version order; `future.md` is never picked from.
+- **Read the record, not the page:** `./scripts/roadmap show <ID>` prints one row's section and its commits, and `next --json`/`stats --json` print data for a tool. Pasting a whole chain or detail page spends context on rows the task does not touch.
 - **No separate grouping:** no headings by origin or carry-over. Finished rows stay in place, and the changelog carries the user-facing release notes.
 
 ## Priority ordering rules
@@ -51,6 +52,10 @@ When adding or re-prioritizing rows, follow this strict precedence:
 7. **Release-time tasks:** packaging, tagging, and deployment verification.
 
 Ties break toward the smaller item.
+
+## Handoff
+
+A plan handed to another agent is an execution spec: signatures, edge cases, exact commands and the acceptance check, never code bodies. The reader has the repository, and a pasted sketch is re-read on every later turn and stale the moment the code moves. Quote only a load-bearing literal - a message, a wire key, a search token - and name paths and symbols for the rest.
 
 ## Screenshots
 
@@ -85,6 +90,7 @@ Never embed an image in an index row, a detail section or a chain page. Release 
 3. If the row closed a bug, the fix commit carries a `Cause: <class>` trailer matching [Defect classes](defect-classes.md).
 4. A screenshot reference links the release's `screenshots/<page>.md` as above.
 5. Gates: `python3 scripts/docs-check`, `./scripts/build-docs`; a catalogue edit also runs `./scripts/check-capabilities`.
+6. **Ship it:** name the PR's class in its body (`docs` for roadmap, screenshot and guide content; `code`/`gate` for a runner or workflow edit) and land gate-runner (`scripts/ci-check`, `scripts/gut-check`, `scripts/check-ffi-surface`, `githooks/**`) or workflow changes as their own PR, never inside the content PR - the gate PR pays the full matrix once, and the content PR stays docs-class.
 
 ## Adding a release chain
 
