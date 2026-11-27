@@ -77,7 +77,10 @@ done
 if [[ $# -gt 0 ]]; then
     STATES=("$@")
 else
-    mapfile -t STATES < <("$CAPTURE" --list)
+    STATES=()
+    while IFS= read -r state; do
+        STATES+=("$state")
+    done < <("$CAPTURE" --list)
 fi
 [[ ${#STATES[@]} -gt 0 ]] || { echo "ui-capture-check: no states" >&2; exit 2; }
 

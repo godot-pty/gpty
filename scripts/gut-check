@@ -497,17 +497,27 @@ elif (( JUDGED )); then
 fi
 
 shopt -s nullglob
-declare -A DIRECT=()
+DIRECT=()
 for dir in "${TEST_DIRS[@]}"; do
     for file in "$dir"/test_*.gd; do
-        DIRECT["$file"]=1
+        DIRECT+=("$file")
     done
 done
 EXPECTED="${#DIRECT[@]}"
 
+is_direct() {
+    local candidate="$1" f
+    for f in "${DIRECT[@]}"; do
+        if [[ "$f" == "$candidate" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 NESTED=()
 while IFS= read -r file; do
-    [[ -n "${DIRECT[$file]:-}" ]] || NESTED+=("$file")
+    is_direct "$file" || NESTED+=("$file")
 done < <(find "${TEST_DIRS[@]}" -name 'test_*.gd' | sort)
 
 if (( ! IS_FILTERED )); then

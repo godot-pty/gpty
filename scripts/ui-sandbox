@@ -47,7 +47,7 @@ gpty_sandbox_init() {
     for var in HOME XDG_DATA_HOME XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME \
         XDG_RUNTIME_DIR GPTY_TEST_USER_DIR GPTY_SOCKET GPTY_SECRET BASH_ENV ENV \
         PROMPT_COMMAND PS1 PS2 CDPATH HISTFILE; do
-        if [[ -v $var ]]; then
+        if eval "[ -n \"\${$var+x}\" ]"; then
             GPTY_SANDBOX_SAVED+=("$var=${!var}")
         else
             GPTY_SANDBOX_SAVED+=("$var")
