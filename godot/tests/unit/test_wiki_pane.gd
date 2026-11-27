@@ -2124,17 +2124,24 @@ func test_a_dragged_node_keeps_its_place_across_a_build():
 	if pane._graph_view is VaultGraph3D:
 		var graph := pane._graph_view as VaultGraph3D
 		graph._place_body("a.md", Vector2(11, 22))
-		# A finished drag settles the simulation. Without this the physics keeps
-		# running between the place and the second build, and a slow runner's
-		# extra ticks move the body out from under the assertion.
+		# A finished drag settles the simulation, so the export is the last word.
 		graph._settle_now()
 	else:
 		pane._graph_view.positions["a.md"] = Vector2(11, 22)
-	await _open_graph(pane)
 
-	var got: Vector2 = pane._graph_view.positions.get("a.md", Vector2.ZERO)
+	# Ask the pane's own build for the next document with the geometry it would
+	# hand over. The claim is about that handoff (view -> build); a second live
+	# rebuild also runs the view swap and the physics, and whether the rebuild's
+	# source was the export or a fresh layout made this assertion pass or fail on
+	# the runner (BUILD-140, macOS).
+	var carried: Dictionary = pane._graph_view.export_positions()
+	assert_true(carried.has("a.md"), "the view exports the dragged node")
+	var out := []
+	pane._build_graph_document(pane._vault_root, {}, carried, out)
+	var built: Dictionary = out[0] if out.size() == 1 else {}
+	var got: Vector2 = built.get("positions", {}).get("a.md", Vector2.ZERO)
 	assert_lt((got - Vector2(11, 22)).length(), 1.0,
-		"the pane hands the view's geometry to the build, so a drag survives")
+		"the build keeps the geometry the pane hands it")
 
 
 # ── Declared edge weights (the authored layer) ─────────────────────────

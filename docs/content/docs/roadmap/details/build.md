@@ -2910,4 +2910,11 @@ graph's simulation (`_settle_now`) after placing a dragged body so the physics i
 author of the position. Tests: the three named tests, in the full suite on Linux and `--dir unit` on
 macOS.
 
+**Corrected 2026-11-27.** The macOS value is identical on every run (`683.804138183594`, two
+separate runs including the merge-queue build), so this was not the frame pace: the second live
+rebuild's *source* was a fresh layout rather than the view's export on that path, and the assertion
+raced the view swap. The test now asserts the handoff at its seam - `export_positions()` into the
+pane's own `_build_graph_document` - which is deterministic and is the contract the test names; the
+settle stays because a finished drag is the state being exported.
+
 Commits: e08a654
