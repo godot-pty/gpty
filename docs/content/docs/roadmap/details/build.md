@@ -2038,6 +2038,12 @@ the version sort - kept under a second so it fits the tooling class it runs in. 
 runs by hand once per history backfill, where a silent skip reads as a release that was never
 measured.
 
+**Implemented 2026-11-27.** `scripts/backfill-cost-history` reads `GPTY_COST_LEDGER` (default the
+committed ledger). `scripts/tooling-smoke` builds two archives (the canonical directory and a
+`.pck`-parent fallback) and a ledger fixture, then asserts the extraction lines, the skip message,
+`--force`, and the `0.9.9`/`0.10.0` version sort. The fixture passes in under a second and never
+measures.
+
 ## BUILD-97
 
 **Half of every GUT run is fixed `create_timer(2.1)` sleeps** - measured 2026-11-02 on a green run:
@@ -2052,6 +2058,14 @@ and each fixed sleep replaced by the condition it stands for, with a generous ti
 failure still fails rather than hangs (the gate's stall guard is the backstop). Acceptance: the
 Linux suite runs at least 40 s faster, each replaced wait fails when its condition never holds, and
 three consecutive runs are green.
+
+**Implemented 2026-11-27.** `godot/tests/helpers/test_waits.gd` supplies the bounded predicate;
+`workspace.gd`'s three 2 s deferrals now use a child `Timer` that is freed with the workspace, so
+teardown no longer resumes a coroutine. All 73 fixed `create_timer(2.1)` waits are gone: 69 removed,
+four (the plugin-content refresh) rewritten as `TestWaits.until`. The new regression frees a
+settling workspace and waits 2.2 s inside GUT. Measured: baseline 314.4 s (135/136 scripts, because
+the new test file landed during that run), first post-change run 160.8 s with 136 scripts / 1804
+tests all green; the close-out records the two further green runs.
 
 ## BUILD-98
 
@@ -2125,6 +2139,16 @@ measure the IPC span only if the v0.9.0 timers show it. Tests: `file` reports th
 stripped, the sizes and wall times are in the v0.9.4 changelog, `cargo test --workspace` passes, and
 Godot loads the stripped extension (the pane-API smoke is the load proof).
 
+**Implemented 2026-11-27.** `[profile.release]` now sets `opt-level = 3`, `lto = "thin"`,
+`codegen-units = 1` and `strip = "symbols"`; `build-linux` asserts both release artifacts report
+`stripped`. A clean release build here took 71.6 s (well inside the 1800 s fallback threshold, so
+`codegen-units` stayed at 1). Sizes: `libgpty_gdext.so` 13,381,112 → 9,834,992 bytes (−26.5%) and
+`gpty` 6,087,616 → 3,883,712 bytes (−36.2%); `file` reports both as stripped. Replacing
+`godot/bin/libgpty_gdext.linux.x86_64.so` with the stripped library, `godot --import` and
+`ui-capture --list` both succeed (85 states), so the exported `gdext_rust_init` survives. The CI
+`build-linux`/`build-windows`/`build-macos` wall times remain the tag/dispatch proof; this machine's
+clean build is the local number.
+
 ## BUILD-101
 
 **The dev inner loop links every crate with the system linker and keeps full debug info** - there is
@@ -2143,6 +2167,14 @@ cost. Tests: `scripts/dev-linker --check` fails with a clear message when neithe
 passes when one does; a clean `cargo build -p gpty-gdext` works without running the helper; the
 Windows check still parses the dev profile.
 
+**Implemented 2026-11-27.** `scripts/dev-linker` detects mold then ld.lld (lld on macOS, lld-link on
+Windows), prints the `RUSTFLAGS` export, and `--write` produces a gitignored `.cargo/config.toml`;
+`DEV_LINKER_BIN_DIR` makes both outcomes testable. `[profile.dev] split-debuginfo = "unpacked"` is
+in the root manifest. On this machine an incremental `gpty-gdext` rebuild took 0.654 s with the
+system linker and 0.642 s with mold; a `gpty` rebuild took 0.416 s vs 0.436 s. The difference is
+within noise at this project size, so the helper stays opt-in rather than a hard dependency. The
+unpacked debug info costs 230,205,992 bytes of `.dwo` under `target/debug`.
+
 ## BUILD-102
 
 **Seven crate names resolve to two versions, and most are upstream pins** - measured 2026-11-24 in
@@ -2160,6 +2192,15 @@ measure `cargo build --release` time and the CI cache payload before and after. 
 parent drops a pin, record the parent and version in this row and leave it, rather than replacing a
 working crate for a duplicate.
 
+**Attributed 2026-11-27.** `cargo tree --workspace --target all -i` shows: bitflags 1.3.2 ←
+portable-pty 0.9.0; getrandom 0.2.17 ← dirs 7.0.0 → dirs-sys 0.5.0 → redox_users 0.5.2
+(Redox-only); shlex 1.3.0 ← bindgen 0.72.1 ← ffmpeg-sys-the-third 6.0.0 (build-only); syn 2.0.119
+← bindgen/defmt-macros/jiff-static/thiserror-impl 1; thiserror and thiserror-impl 1.0.69 ←
+filedescriptor 0.8.3 ← portable-pty 0.9.0; windows-sys 0.59.0 ← alacritty_terminal 0.26.0.
+`portable-pty` 0.9.0 and `alacritty_terminal` 0.26.0 are the latest releases, bindgen 0.73+ is not
+pinned by any released ffmpeg-sys-the-third, and dirs 7.0.0 is latest: no parent bump removes a pin.
+No dependency or lockfile change; the recorded skips live in BUILD-103.
+
 ## BUILD-103
 
 **`multiple-versions = "warn"` lets a new duplicate land with every gate green** - `deny.toml`'s
@@ -2172,6 +2213,12 @@ comment naming the parent and the condition that removes it. Keep the `cargo-den
 do not silence the check globally. Tests: the committed lock passes `cargo deny check bans`;
 temporarily adding a duplicate of an unskipped crate to a crate's dev-dependencies fails the check,
 and the temporary change is reverted.
+
+**Implemented 2026-11-27.** `deny.toml` sets `multiple-versions = "deny"` and
+`multiple-versions-include-dev = true`; seven `[[bans.skip]]` entries pin the recorded upstream
+versions with their parent/removal comments. `cargo deny check bans` is green. Proof: adding
+`hashbrown = "=0.14.5"` as a dev-dependency produced `found 2 duplicate entries for crate
+'hashbrown'` and exit 2; reverting the manifest and lockfile returned it to green.
 
 ## BUILD-104
 
@@ -2186,6 +2233,13 @@ defect is that the step passes either way, so a script that genuinely does not c
 too, and a real failure is invisible in the log. Fix: fail the export on a `SCRIPT ERROR` outside a
 closed set of the four expected import classes, the same shape as `scripts/ui-capture`'s own log
 gate, and name that set in the step so it stays a list rather than a threshold.
+
+**Implemented 2026-11-27.** `scripts/export-check` runs a command through `tee`, passes its exit
+status, and fails on any `SCRIPT ERROR`/`Failed to load script` outside the four named import-pass
+classes. The import and all three export steps call it; `--check-log` fixtures cover the four
+allowed lines, an unknown parse error and a failed script load. A local
+`godot --headless --path godot --import` through the gate exits 0; the release dispatch is the
+end-to-end run.
 
 ## BUILD-105
 
@@ -2202,6 +2256,17 @@ writes after signing, and measure the graph's first-open time and the bundle siz
 Linux and Windows stay unchanged until their backends demonstrate the same. Tests: a release-build
 check asserts the macOS bundle carries the cache and the app opens the graph without the compile
 hitch; record the numbers in the v0.9.0 budget table.
+
+**Blocked 2026-11-27.** The export job (`release-build.yml`) runs on `ubuntu-24.04` and calls
+`godot --headless --path godot --export-release "macOS"`. Godot 4.7's shader baker is not supported
+under `--headless`, and a Linux editor can bake Vulkan only; the Metal baker requires a macOS editor,
+so the export host cannot produce the cache at all. Godot 4.7.2 issue #123266 is a second blocker:
+with `application/min_macos_version_arm64` below 14.00 (the preset has 11.00), a baked build aborts
+on Apple Silicon; 14.00 works, and the export-side cache must be cleared between bakes. The preset
+stays off; the macOS export move and the min-version decision are tracked by BUILD-138. No size or
+first-open number can be claimed from this row.
+
+Blocked by: BUILD-138.
 
 ## BUILD-106
 
@@ -2249,6 +2314,13 @@ may be virtualized. Tests: the job's green run on this SHA; `RendererInfo`'s els
 Retina scale path appear in the log; a GDScript-only PR's run skips it and a merge-group run
 includes it.
 
+**Implemented 2026-11-27.** `scripts/install-godot` resolves `macos-arm64` from the pinned universal
+archive (SHA512 added to `godot-version.json`) and puts the nested `Godot.app/Contents/MacOS`
+executable on PATH. The `macos` job (75-minute cap) now installs Godot, builds the CLI/extension,
+imports, runs `ui-capture --check`, the pane-API smoke, `--dir unit` and the five platform-path
+tests. `scripts/classify-changes` prints `macos=false` for a GDScript path and `macos=true` for
+`Cargo.toml`; the PR's macOS run is the remaining proof.
+
 ## BUILD-108
 
 **`measure-cost --check` still hard-fails on a stamp older than the workspace** - found 2026-11-23
@@ -2259,6 +2331,12 @@ last measured build. Fix: compare the stamp with the newest release in
 `docs/data/cost-history.json`, the same rule as `--stamp`; leave row drift as the check's signal.
 Tests: a version bump with an unchanged ledger leaves the stamp line green; advancing the ledger
 without moving the README stamp fails.
+
+**Implemented 2026-11-27.** `scripts/measure-cost` has one `newest_ledger_version()` used by both
+`--stamp` and a new early `--check` gate; the old final `crate_version()` comparison is gone.
+`--stamp` is green. With the README stamp temporarily changed to v0.0.0, `--check` exits 1 with
+`measure-cost: STAMP: README names v0.0.0, newest ledger build is v0.8.6 - ...` before any launch;
+the README was restored.
 
 ## BUILD-109
 
@@ -2276,6 +2354,12 @@ call `--check`; `ui-capture-check` keeps `--list` for the state names. Tests: `-
 "harness loads (N states)" and "negative probe refused"; a scratch legal probe fails with "the load
 gate no longer detects a typed app class".
 
+**Implemented 2026-11-27.** `scripts/ui-capture --check` runs the clean `-s` harness load (85
+states), then writes the typed-field probe, requires a `SCRIPT ERROR`, and removes the probe on
+exit; the dotfile falls back to `_gate_probe.gd`. `--check` prints `harness loads (85 states)` and
+`negative probe refused`; a clean scratch probe exits 1 with `the load gate no longer detects a
+typed app class`, and no probe file remains. `ci-check` and the Linux CI job call `--check`.
+
 ## BUILD-110
 
 **The local gate cannot be narrowed, reused, or asked for help** - `./scripts/ci-check --help` ran
@@ -2292,6 +2376,13 @@ otherwise runs it and stamps; `--stamp-check` reports validity without running; 
 calls `--stamped`. Tests in `run_tooling_scripts`: help and unknown-option exit codes, `--only docs`
 runs only docs, and the stamp accepts a matching fixture while rejecting a changed tree, ci-check
 hash, hook hash, tool version or dirty tree.
+
+**Implemented 2026-11-27.** `scripts/ci-check` has the ordered `STEPS` list, `step_<id>` functions,
+`--help`, `--list-steps`, `--only`, `--fast`, and the `.git/gpty-ci-check.stamp` fingerprint over the
+tree, the gate script, the pre-push hook and the rustc/cargo/Godot versions. `--stamped` skips only
+a matching clean tree, `--stamp-check` reports, and `--stamp` runs the full gate and writes. The
+fast gate passes in 32.9 s; `--only docs` passes without reaching `cargo test`; the stamp fixture
+accepts itself and rejects every changed field and a dirty tree.
 
 ## BUILD-111
 
@@ -2334,6 +2425,12 @@ flag as a state or path. Fix: every script in the tooling-class list plus `build
 print the header comment, Python scripts use argparse) and exits 0, and prints usage to stderr and
 exits 2 on an unknown option; `ci-check` is the row above. Tests in `run_tooling_scripts`: loop the
 same set, `--help` exits 0 and prints usage, `--definitely-not-an-option` exits 2.
+
+**Implemented 2026-11-27.** `check-secrets`, `bot-token`, `git-askpass-token` (help only),
+`install-rust`, `ui-capture`, `ui-capture-check`, `build-wiki`, `build-docs`, `docs-check`,
+`tooling-smoke`, `dev-linker`, `export-check` and `ci-check` now answer `--help` with usage and exit
+0; every listed script except the git prompt helper rejects an unknown option with exit 2.
+`tooling-smoke` loops the contract.
 
 ## BUILD-114
 
@@ -2616,6 +2713,11 @@ base, so the hook falls back to the full suite. Tags and branch deletes never ne
 Fix: skip refs that are not `refs/heads/*` and a zero local sha; run the docs gates (or nothing for
 a delete) and say so in the hook comment.
 
+**Implemented 2026-11-27.** `githooks/pre-push` skips non-branch refs and all-zero local shas,
+keeps the merge-base and multi-ref rules, and calls `ci-check --stamped`; `CI_CHECK_BIN` is the
+test seam. Fixtures prove a tag and a delete exit 0 without invoking the gate and a branch invokes
+`--stamped`.
+
 ## BUILD-135
 
 **The docs CI job runs code static checks on a docs-only PR** - the `docs` job in
@@ -2652,3 +2754,18 @@ ledger.section(row)` (the detail page) and prints `rel(page.path):{row.line}`, p
 path with another file's line. Fix: print `rel(row.page.path):{row.line}` (the index row the
 second line quotes) and leave the detail page path out of the header. Test: extend the `selftest`
 fixture so `show TEST-1` asserts the `v0.0.md` header.
+
+## BUILD-138
+
+**The macOS app export is headless on Linux, so the Metal shader baker cannot run** - the
+`release-build.yml` `export` job runs on `ubuntu-24.04` and calls
+`godot --headless --path godot --export-release "macOS"`. Godot 4.7's shader baker is not supported
+under `--headless`, and a Linux editor can bake Vulkan only; the Metal baker requires a macOS
+editor, so the export host cannot produce the Metal cache at all. Godot 4.7.2 issue #123266 also
+aborts a baked build on Apple Silicon when `application/min_macos_version_arm64` is below 14.00
+(ours is 11.00); 14.00 works, and the export-side cache must be cleared between bakes. Fix: move
+the macOS app export to a non-headless macOS job (e.g. extend `bundle-macos`), raise
+`min_macos_version_arm64` to 14.00 or wait for the engine fix, clear `.godot/exported`, verify the
+shader cache lands in the `.app`, re-sign after baking, and measure the graph's first-open time and
+bundle size on a real Mac. Tests: a release-build dispatch carries the cache and the app opens the
+graph without the compile hitch; record the numbers in the v0.9.0 budget table.
