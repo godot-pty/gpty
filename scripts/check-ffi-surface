@@ -24,6 +24,8 @@ round trip as a renamed export — `get_grid_rows()` was named in three places
 and existed in none.
 
 Exit codes: 0 clean, 1 problems found. Reads only; never writes.
+`--selftest` runs the argument walker's own cases and exits 0/1; it reads
+nothing outside this file.
 """
 
 from __future__ import annotations
@@ -91,35 +93,95 @@ GEXT_README = ROOT / "crates" / "gpty-gdext" / "README.md"
 
 
 def balanced_args(text: str, open_paren: int) -> str:
-    """Return the argument list of a call whose '(' is at `open_paren`."""
-    depth = 0
-    for i in range(open_paren, len(text)):
+    """Return the argument list of a call whose '(' is at `open_paren`.
+
+    A bracket inside a string literal is text, not structure: the walk skips
+    single- and double-quoted strings (and their backslash escapes) before it
+    counts a paren.
+    """
+    depth, quote = 0, None
+    i = open_paren
+    while i < len(text):
         ch = text[i]
-        if ch == "(":
+        if quote is not None:
+            if ch == "\\" and i + 1 < len(text):
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "(":
             depth += 1
         elif ch == ")":
             depth -= 1
             if depth == 0:
                 return text[open_paren + 1 : i]
+        i += 1
     return ""
 
 
 def split_args(arglist: str) -> list[str]:
-    """Split on top-level commas (generics and nested calls included)."""
-    out, depth, current = [], 0, []
-    for ch in arglist:
-        if ch in "(<[{":
+    """Split on top-level commas (generics and nested calls included).
+
+    String literals are skipped first: a comma inside `","` is text, not a
+    separator (BUILD-90's `set_palette(",".join(...))` was read as two
+    arguments and failed the gate on a correct call).
+    """
+    out, depth, current, quote = [], 0, [], None
+    i = 0
+    while i < len(arglist):
+        ch = arglist[i]
+        if quote is not None:
+            current.append(ch)
+            if ch == "\\" and i + 1 < len(arglist):
+                current.append(arglist[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch
+            current.append(ch)
+        elif ch in "(<[{":
             depth += 1
+            current.append(ch)
         elif ch in ")>]}":
             depth -= 1
-        if ch == "," and depth == 0:
+            current.append(ch)
+        elif ch == "," and depth == 0:
             out.append("".join(current))
             current = []
         else:
             current.append(ch)
+        i += 1
     if current:
         out.append("".join(current))
     return [a.strip() for a in out if a.strip()]
+
+
+def selftest() -> int:
+    """The argument walkers' own cases, built from BUILD-90's CSV failure."""
+    cases = [
+        ("split_args", split_args('",".join(x)'), ['",".join(x)']),
+        ("split_args", split_args('"a,b", "c"'), ['"a,b"', '"c"']),
+        ("split_args", split_args("'x,y', z"), ["'x,y'", "z"]),
+        ("balanced_args", balanced_args('f(")", x)', 1), '")", x'),
+        ("balanced_args", balanced_args('f("(", x)', 1), '"(", x'),
+        ("split_args", split_args("f(a, (b, c)), d"), ["f(a, (b, c))", "d"]),
+    ]
+    failures = 0
+    for name, got, want in cases:
+        if got != want:
+            print(f"  {name}: {got!r} != {want!r}")
+            failures += 1
+    if failures:
+        print(f"check-ffi-surface selftest: {failures} of {len(cases)} cases failed")
+        return 1
+    print(f"check-ffi-surface selftest: {len(cases)} cases pass")
+    return 0
 
 
 def impl_blocks(text: str) -> list[tuple[str, int, int]]:
@@ -233,6 +295,8 @@ def doc_problems(surface: dict[str, dict[str, int]]) -> tuple[int, list[str]]:
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--selftest"]:
+        return selftest()
     surface, unplaced = exported_surface()
     if not surface:
         print("check-ffi-surface: no #[func] exports found — wrong directory?")

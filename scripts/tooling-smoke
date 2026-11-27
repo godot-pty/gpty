@@ -294,6 +294,11 @@ check "docs-check evidence fixture" check_docs_evidence_fixture
 # in .github/workflows/secret-scan.yml.
 check "check-secrets" ./scripts/check-secrets
 
+# The ffi-surface walkers' own cases: a comma or paren inside a string is text
+# (BUILD-90), and the real export surface is the check beside it.
+check "check-ffi-surface selftest" ./scripts/check-ffi-surface --selftest
+check "check-ffi-surface" ./scripts/check-ffi-surface
+
 # The gate must refuse a planted key, and --root is what lets it judge a
 # fixture's index without touching this repository's.
 check_secret_fixture() {
