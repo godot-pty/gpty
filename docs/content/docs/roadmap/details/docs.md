@@ -449,15 +449,16 @@ Commits: 3153852, 18e42af, 04e689f
 
 ## DOCS-29
 
-**The input-refusal causes are copied into the wiki and drift** - the v0.8.7 CORE change made a dead
-writer a second refusal cause; the handler and the gdext README were updated, but
-`docs/content/wiki/gpty/control-api.md` still said only "input queue is full" until the 2026-11-25
-wrap-up, and the wiki now restates both causes, so a third copy exists. Fix: the wiki
-`inject`/`broadcast` rows say the input was not accepted without enumerating causes; the causes stay
-in the gdext README and the handler's sentence; extend `scripts/check-ffi-surface` so the `inject`
-handler's `refused("Pane ...")` literal and the `send_text` README row both contain `not reading`
-and `writer`, failing on either missing token. Tests: `scripts/check-ffi-surface` passes; a temp
-README copy missing one token fails naming it; `python3 scripts/docs-check`.
+**The input-refusal causes are copied into the wiki and drift** - the wiki's `inject` and
+`broadcast` rows now say the input was not accepted without enumerating causes; the causes stay in
+the handler's sentence and the `send_text` README row. `scripts/check-ffi-surface` asserts both
+places contain `not reading` and `writer` (the handler's inject refusal and the README's `send_text`
+row), with `GPTY_GEXT_README` as the fixture seam, and `scripts/tooling-smoke` proves a copy missing
+`writer` fails naming the copy and the token. `godot/knowledge.json` is rebuilt. Verified with
+`./scripts/check-ffi-surface`, `./scripts/tooling-smoke`, `python3 scripts/docs-check` and
+`./scripts/build-wiki --check`.
+
+Commits: 3153852, 18e42af, f45a7bf
 
 ## DOCS-30
 

@@ -1890,13 +1890,16 @@ Commits: 74028d2, 3ec276b, 6cecfd6, 25adc85
 
 ## BUILD-90
 
-**`check-ffi-surface` reads a comma inside a string literal as an argument separator** - found
-2026-11-20 while adding `set_palette(",".join(...))`: `split_args` walks the call without string
-awareness, so the comma inside `","` sits at depth 0 and the call is reported as two arguments,
-failing the gate on a call that is correct (worked around by assigning the CSV to a local first;
-`docs/content/docs/agents/pitfalls.md` records the trap). The same blind spot applies to a `,`
-inside any string literal in a checked call. Fix: skip string literals (single- and double-quoted)
-in the walker before splitting, with a test built from this failure.
+**`check-ffi-surface` reads a comma inside a string literal as an argument separator** - `split_args`
+and `balanced_args` now track single- and double-quoted literals and backslash escapes, so
+`set_palette(",".join(...))` is one argument and a `)` inside a string no longer truncates the walk.
+`--selftest` carries the failing-before cases - on the old walker `split_args('",".join(x)')`
+returned two arguments and `balanced_args('f(")", x)', 1)` returned `"` - and
+`scripts/tooling-smoke` runs it beside the real check. The pitfalls workaround is replaced by the
+parser's new contract. Verified with `./scripts/check-ffi-surface --selftest`,
+`./scripts/check-ffi-surface` and `./scripts/tooling-smoke`.
+
+Commits: 9571f98, 18e42af, 9826a57
 
 ## BUILD-91
 
