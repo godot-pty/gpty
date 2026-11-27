@@ -2149,9 +2149,9 @@ Godot loads the stripped extension (the pane-API smoke is the load proof).
 `codegen-units` stayed at 1). Sizes: `libgpty_gdext.so` 13,381,112 → 9,834,992 bytes (−26.5%) and
 `gpty` 6,087,616 → 3,883,712 bytes (−36.2%); `file` reports both as stripped. Replacing
 `godot/bin/libgpty_gdext.linux.x86_64.so` with the stripped library, `godot --import` and
-`ui-capture --list` both succeed (85 states), so the exported `gdext_rust_init` survives. The CI
-`build-linux`/`build-windows`/`build-macos` wall times remain the tag/dispatch proof; this machine's
-clean build is the local number.
+`ui-capture --list` both succeed (85 states), so the exported `gdext_rust_init` survives. Release dispatch 46035681169: `build-linux` 158 s,
+`build-windows` 422 s, `build-macos` arm64 449 s, `build-macos` x86_64 539 s, `export` 94 s; the
+`build-linux` stripped assertion and the export gate both passed.
 
 Commits: 84be075, 18e42af, b021fb4
 
@@ -2253,7 +2253,8 @@ export steps call it; `--check-log` fixtures cover the known lines, an unknown p
 unknown failed script. The first release dispatch (run 46033110660) rejected the `Failed to load
 script` lines for `workspace.gd` and the 14 dependent autoloads; 290e470 added that closed list, and
 replaying the real import log through `--check-log` now exits 0. A local
-`godot --headless --path godot --import` also exits 0; the next dispatch is the end-to-end proof.
+`godot --headless --path godot --import` also exits 0. Release dispatch 46035681169 passed the
+import and all three exports through the gate; the `export` job succeeded.
 
 Commits: 8c58684, 18e42af, b021fb4, f830b0d, 290e470
 
@@ -2338,9 +2339,11 @@ tests. `scripts/classify-changes` prints `macos=false` for a GDScript path and `
 `Cargo.toml`. The first macOS run (46033100783) found the helpers were Bash 4-only: `ui-sandbox`
 used `[[ -v ]]`, `gut-check` used `declare -A` and `ui-capture-check` used `mapfile`, which macOS
 `/bin/bash` 3.2 rejects. 11c21b8 replaces them with an eval set test, an indexed file list and a
-read loop; the PR rerun is the remaining proof.
+read loop. The next run (46035674994) reached GUT and failed only on the one legitimate `/proc`
+pending test; 7a53397 allows the documented macOS pending test (printed) while Linux still fails an
+accidental skip. The next run is the proof.
 
-Commits: 68f0558, 18e42af, f830b0d, 11c21b8
+Commits: 68f0558, 18e42af, f830b0d, 11c21b8, 7a53397
 
 ## BUILD-108
 
