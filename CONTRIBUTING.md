@@ -80,6 +80,19 @@ godot --headless --path godot --import
 godot --headless --path godot --export-release "Linux/X11" ../dist/gpty
 ```
 
+### Faster incremental links (optional)
+
+`scripts/dev-linker` detects `mold`/`ld.lld` (or `lld-link` on Windows), prints the
+`RUSTFLAGS` export that uses it, and with `--write` generates a gitignored
+`.cargo/config.toml` for the current machine. `--check` only reports whether a linker is
+available. The choice is opt-in: a clean `cargo build -p gpty-gdext` works without it, and
+the generated config must never be committed.
+
+```bash
+./scripts/dev-linker --check
+./scripts/dev-linker --write   # .cargo/config.toml, gitignored
+```
+
 ### Clean
 
 Remove build/test artifacts for a clean slate - stale IPC sockets, Godot import caches, and standalone `dist/` outputs:

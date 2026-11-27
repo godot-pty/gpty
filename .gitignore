@@ -1,6 +1,7 @@
 # ── Rust ──────────────────────────────────────────────────────────────────
 /target/
 **/*.rs.bk
+.cargo/config.toml
 
 # Compiled GDExtension libraries
 *.so
@@ -18,6 +19,8 @@ godot/export/
 *.translation
 godot/.mono/
 godot/mono_crash.*.json
+godot/tests/bench/.gate-probe.gd*
+godot/tests/bench/_gate_probe.gd*
 
 # ── IDE / Editor ──────────────────────────────────────────────────────────
 .vscode/
