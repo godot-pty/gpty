@@ -1121,15 +1121,16 @@ Commits: 64866cb, 18e42af, 97d3d90
 
 ## SEC-55
 
-**No `/.well-known/security.txt`** - reopened 2026-11-26. The file itself is in place:
-`docs/static/.well-known/security.txt` carries `Contact: mailto:gpty.dev@outlook.com`,
-`Expires: 2027-11-01T00:00:00Z`, `Preferred-Languages: en`,
-`Canonical: https://gpty.dev/.well-known/security.txt` and
-`Policy: https://gpty.dev/docs/security/`, and the Docs build verifies it. The first deploy still
-answered 404 because `actions/upload-pages-artifact` v5.0.0 excludes hidden paths unless
-`include-hidden-files` is true, so `./.well-known/` was absent from the artifact tarball. Fix:
-enable that input on the upload step. Acceptance: `https://gpty.dev/.well-known/security.txt`
-returns 200 with the five fields.
+**No `/.well-known/security.txt`** - closed 2026-11-26. The file is served at
+`https://gpty.dev/.well-known/security.txt` (HTTP 200, `text/plain`) with
+`Contact: mailto:gpty.dev@outlook.com`, `Expires: 2027-11-01T00:00:00Z`,
+`Preferred-Languages: en`, `Canonical: https://gpty.dev/.well-known/security.txt` and
+`Policy: https://gpty.dev/docs/security/`. The source is
+`docs/static/.well-known/security.txt`; the Docs build verifies it, and the Pages upload enables
+`include-hidden-files` (the first deploy returned 404 because the action drops hidden paths by
+default). SECURITY.md links the live URL.
+
+Commits: 39ef2cf, 6cecfd6, 18e42af, 97d3d90, 217890a, 71d408f
 
 ## SEC-56
 
