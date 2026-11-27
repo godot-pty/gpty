@@ -1,0 +1,193 @@
+name: Cache Warm
+
+# The writer for the caches `ci.yml` restores. Caches are ref-scoped, and
+# `ci.yml` runs no push-to-main job (the merge queue is the code gate), so a
+# PR-scoped or merge-group cache is unreadable by the next PR. This workflow
+# runs on main when the dependency graph or a CI definition changes, and it is
+# the only place a Rust cache is saved; every CI job is restore-only. It also
+# re-warms the Windows vcpkg tree after an eviction, so a pull request does
+# not pay the 20-26 minute source build.
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - fuzz/Cargo.toml
+      - fuzz/Cargo.lock
+      - .github/workflows/ci.yml
+      - .github/workflows/cache-warm.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cache-warm-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The shared-key values match ci.yml exactly; the OS/arch is part of the
+  # action's own key, so one shared-key per platform is the whole contract.
+  warm-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: ./scripts/install-rust
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-debug
+          save-if: true
+          cache-on-failure: true
+
+      - name: Cache FFmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg/linux-x86_64
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-
+
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
+      - name: Warm the Linux cache
+        run: cargo test --workspace --locked
+
+  warm-windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: ./scripts/install-rust
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-debug
+          save-if: true
+          cache-on-failure: true
+
+      - name: Cache vcpkg FFmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\packages
+            C:\vcpkg\downloads
+          key: vcpkg-ffmpeg-${{ runner.os }}-9.0.2
+          restore-keys: |
+            vcpkg-ffmpeg-${{ runner.os }}-
+
+      - name: Cache FFmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg/windows-x86_64
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-
+
+      - name: Build media dependencies
+        shell: bash
+        env:
+          VCPKG_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:/vcpkg' }}
+        run: ./scripts/media-deps
+
+      - name: Warm the Windows cache
+        run: cargo build --workspace --tests --locked
+
+  warm-macos:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: ./scripts/install-rust
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: macos-check
+          save-if: true
+          cache-on-failure: true
+
+      - name: Cache FFmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg/macos-arm64
+          key: ${{ runner.os }}-${{ runner.arch }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-ffmpeg-
+
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
+      - name: Warm the macOS cache
+        run: cargo check --workspace --tests --locked
+
+  warm-fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install nightly toolchain
+        run: ./scripts/install-rust --manifest-path fuzz
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: fuzz
+          workspaces: "fuzz -> target"
+          save-if: true
+          cache-on-failure: true
+
+      - name: Cache cargo-fuzz
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-0.13.2-${{ runner.os }}
+
+      - name: Cache FFmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg/linux-x86_64
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-
+
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
+      - name: Install cargo-fuzz
+        run: command -v cargo-fuzz >/dev/null || cargo install cargo-fuzz --locked --version 0.13.2
+
+      - name: Build the fuzz targets
+        run: |
+          source dist/ffmpeg/linux-x86_64/env.sh
+          cargo fuzz build

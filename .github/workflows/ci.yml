@@ -31,15 +31,20 @@ env:
 
 jobs:
   # ── Changed-path classifier ───────────────────────────────────────────
-  # Docs-only diffs skip the Rust/Godot/Windows jobs. A workflow-level path
-  # filter cannot do this (the required context would never be reported); a
-  # skipped job reports success, so a full-suite job gated on `code` keeps
-  # the required check satisfied.
+  # The four bits let a GDScript-only diff skip the Rust, Windows and macOS
+  # jobs, and a Node-only diff skip the whole code matrix. A workflow-level
+  # path filter cannot do this (the required context would never be reported);
+  # a skipped job reports success, so a full-suite job gated on one bit keeps
+  # the required check satisfied. An unclassified path sets every bit, and a
+  # merge-queue group always runs the full matrix (the gate before `main`).
   changes:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      rust: ${{ steps.filter.outputs.rust }}
+      godot: ${{ steps.filter.outputs.godot }}
+      node: ${{ steps.filter.outputs.node }}
+      macos: ${{ steps.filter.outputs.macos }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,32 +55,32 @@ jobs:
       - name: Classify changed paths
         id: filter
         env:
+          EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD: ${{ github.event.merge_group.head_sha || github.sha }}
         run: |
           set -euo pipefail
+          all_true() {
+            printf 'rust=true\ngodot=true\nnode=true\nmacos=true\n' >> "$GITHUB_OUTPUT"
+          }
+          if [ "$EVENT" = merge_group ]; then
+            all_true
+            echo "merge queue: running the full matrix"
+            exit 0
+          fi
           if [ -z "${BASE:-}" ] || [[ "$BASE" =~ ^0+$ ]]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            echo "no base commit; running the full suite"
+            all_true
+            echo "no base commit; running the full matrix"
             exit 0
           fi
           if ! git diff --name-only "$BASE" "$HEAD" > /tmp/changed; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            echo "cannot diff $BASE..$HEAD; running the full suite"
+            all_true
+            echo "cannot diff $BASE..$HEAD; running the full matrix"
             exit 0
           fi
-          code=false
-          while IFS= read -r path; do
-            [ -n "$path" ] || continue
-            case "$path" in
-              # Workflow YAML is lint-only in `lint-workflows`; the app jobs
-              # cannot exercise a workflow, so it joins the docs allowlist.
-              docs/*|assets/site-icons/*|*.md|.github/workflows/*|godot/knowledge.json|godot/docs.json|LICENSE|LICENSE-EXCEPTIONS.md|scripts/docs-check|scripts/check-capabilities|scripts/build-wiki|scripts/build-docs|scripts/roadmap) ;;
-              *) code=true ;;
-            esac
-          done < /tmp/changed
-          echo "code=$code" >> "$GITHUB_OUTPUT"
-          printf 'changed files: %s; code=%s\n' "$(wc -l < /tmp/changed)" "$code"
+          bits="$(./scripts/classify-changes < /tmp/changed)"
+          printf '%s\n' "$bits" >> "$GITHUB_OUTPUT"
+          printf 'changed files: %s\n%s\n' "$(wc -l < /tmp/changed)" "$bits"
 
   # ── Workflow linting (YAML syntax) ────────────────────────────────────
   lint-workflows:
@@ -107,9 +112,27 @@ jobs:
           python3 scripts/build-wiki --check
           python3 scripts/build-docs --check
 
-      # The cheap half of scripts/ci-check that CI did not mirror. These read
-      # source or generated data and finish in seconds; they belong in the
-      # gate, not only in a contributor's local run.
+      # The tooling scripts' own smoke (bash -n, py_compile, a planned
+      # backfill, the index secret scan). It was local-only; a broken tooling
+      # script could pass CI and fail the next pre-push.
+      - name: Tooling smoke
+        run: ./scripts/tooling-smoke
+
+  # ── Static source gates (rust or godot diff) ──────────────────────────
+  # These read source or generated data and finish in seconds; moving them
+  # out of `docs` keeps a docs-only PR on the docs gates and makes a
+  # GDScript-only PR run the checks that read GDScript.
+  static:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.godot == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Check release versions
         run: ./scripts/release-prepare --check
 
@@ -170,7 +193,7 @@ jobs:
   # ── Rust tests (core + gdext + cli) ──────────────────────────────────
   rust-tests:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -182,15 +205,11 @@ jobs:
       - name: Install Rust toolchain
         run: ./scripts/install-rust --target x86_64-unknown-freebsd
 
-      - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/registry
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          shared-key: linux-debug
+          save-if: false
 
       - name: Cache FFmpeg
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -235,7 +254,7 @@ jobs:
   # ── OMP extension tests (Node, no omp install) ────────────────────────
   omp-events-tests:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.node == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -251,7 +270,7 @@ jobs:
   # ── GDScript tests (GUT headless) ────────────────────────────────────
   gut-tests:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.godot == 'true'
     runs-on: ubuntu-24.04
     # The same guard as the Windows jobs: this one boots Godot and the GUI, so
     # a hang must fail in minutes rather than at GitHub's six-hour cap.
@@ -270,15 +289,11 @@ jobs:
       - name: Install Rust toolchain
         run: ./scripts/install-rust
 
-      - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/registry
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          shared-key: linux-debug
+          save-if: false
 
       - name: Cache FFmpeg
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -340,7 +355,7 @@ jobs:
   # toolchain, restoring vcpkg and running `media-deps` for the same tree.
   windows:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: windows-2025
     # The old smoke cap was 45 with a 26.5-min cold vcpkg rebuild recorded;
     # the merged job adds the compile and test steps on top.
@@ -355,15 +370,11 @@ jobs:
         shell: bash
         run: ./scripts/install-rust
 
-      - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/registry
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          shared-key: windows-debug
+          save-if: false
 
       - name: Cache vcpkg FFmpeg
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -475,7 +486,7 @@ jobs:
   # ── macOS compile parity ──────────────────────────────────────────────
   macos:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.macos == 'true'
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -487,15 +498,11 @@ jobs:
       - name: Install Rust toolchain
         run: ./scripts/install-rust
 
-      - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/registry
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          shared-key: macos-check
+          save-if: false
 
       - name: Cache FFmpeg
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -516,7 +523,7 @@ jobs:
   # ── Rust formatting ───────────────────────────────────────────────────
   rust-fmt:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -534,7 +541,7 @@ jobs:
   # ── Dependency audit ──────────────────────────────────────────────────
   cargo-audit:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -600,7 +607,7 @@ jobs:
   # keeps the checked graph identical to the local gate's.
   cargo-deny:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -620,7 +627,7 @@ jobs:
   # made private again) fails on the change that did it instead of weeks later.
   fuzz-build:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -632,17 +639,12 @@ jobs:
       - name: Install nightly toolchain
         run: ./scripts/install-rust --manifest-path fuzz
 
-      - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          # The fuzz crate is its own workspace, so its target dir is
-          # `fuzz/target`; the registry is shared with the stable jobs.
-          path: |
-            ~/.cargo/registry
-            fuzz/target
-          key: ${{ runner.os }}-fuzz-${{ hashFiles('fuzz/Cargo.toml', 'fuzz/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-fuzz-
+          shared-key: fuzz
+          workspaces: "fuzz -> target"
+          save-if: false
 
       - name: Cache cargo-fuzz
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -684,7 +686,7 @@ jobs:
   # added.
   ci-gate:
     if: always()
-    needs: [changes, lint-workflows, docs, commit-lint, rust-tests, omp-events-tests, windows, macos, gut-tests, rust-fmt, cargo-audit, cargo-deny, fuzz-build]
+    needs: [changes, lint-workflows, docs, static, commit-lint, rust-tests, omp-events-tests, windows, macos, gut-tests, rust-fmt, cargo-audit, cargo-deny, fuzz-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
