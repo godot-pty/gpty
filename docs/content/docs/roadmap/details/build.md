@@ -1977,7 +1977,8 @@ deleted too. A second dispatch `45924435909` restored the exact keys
 (`Restored from cache key "v0-rust-linux-debug-…" full match: true`): Linux 49s,
 Windows 1m58s, macOS 39s, fuzz 1m07s, with `cargo test --workspace` passing on Linux.
 A PR run restores these keys and saves nothing (`save-if: false` in
-`ci.yml`).
+`ci.yml`). The session's release dispatch then added its release-profile caches: the
+repository stood at 17 entries / 2.64 GiB, still below the 9-10 GiB baseline.
 
 Commits: 84be075, 18e42af, e376411, c7bbac7
 
