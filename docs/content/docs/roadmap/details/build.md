@@ -2655,6 +2655,13 @@ required remote Secret scan catches a key on the PR, yet a docs push can pass lo
 remotely. Fix: run `scripts/check-secrets` in the docs branch (about a second) or state the reliance
 in `testing.md`; add a fixture that plants a fake key and expects the docs path to fail.
 
+**Implemented 2026-11-27.** The docs-class branch of `ci-check` now runs `scripts/check-secrets`
+(`SELECTED=(workflows docs capabilities secrets cost)`), and `check-secrets --root DIR` scans
+another work tree's index so `scripts/tooling-smoke` can plant `sk_live_…` in a fixture and require
+the gate to name the rule, then pass once it is unstaged.
+
+Commits: 5fbf5b5, 3d4b544
+
 ## BUILD-127
 
 **The CI docs class is five copies with no drift check** - the 2026-11-26 change had to update five
@@ -2683,6 +2690,15 @@ Commits: 5fbf5b5, e376411, c7bbac7
 one `scripts/roadmap_lib.py` with the row parser, ID regex, detail path and wrap helper, imported by
 all four; the ledger selftest parses the same fixture through it.
 
+**Implemented 2026-11-27.** `scripts/roadmap_lib.py` owns the row parser, the ID rule,
+`detail_link`, `page_names`, `areas`, `front_matter`, `COMMIT_RE`/`COMMIT_LINE`, the 768-byte cap
+and the `wrap` helper; `scripts/roadmap`, `scripts/docs-check`, `scripts/check-capabilities` and
+`scripts/render-capabilities` import it, and the `❌`-row labelling bug the old renderer regex
+carried is gone. `scripts/tooling-smoke` compiles the module, `DOCS_PATTERNS` and the `Docs`
+workflow watch it, and the ledger selftest exercises the same parser on its fixture.
+
+Commits: 5fbf5b5, 3d4b544
+
 ## BUILD-129
 
 **docs-check does not enforce the evidence shape it relies on** - `docs-check` proves index/detail
@@ -2691,6 +2707,14 @@ set equality, titles, section order and the `Commits:` line, but not a detail li
 links, and not a chain page that has captures but no page link. A new row or screenshot page can
 regress the read or the links with every gate green. Fix: a max line length for detail and
 screenshot pages, a screenshot-page link/orphan check, and a selftest fixture that trips each.
+
+**Implemented 2026-11-27.** `docs-check` reads `DOCS_ROOT` and rejects a detail or screenshot line
+over 768 bytes and a screenshot page no page outside `screenshots/` links; the one real offender
+(`screenshots/v0.8.md`, 779 bytes) is wrapped. `scripts/tooling-smoke`'s `docs-check evidence
+fixture` builds a passing tree, then trips each rule (`line is 800 bytes (cap 768)`, `screenshot
+page is not linked from any markdown page`), so a gate that stopped catching them fails the smoke.
+
+Commits: 5fbf5b5, 3d4b544
 
 ## BUILD-130
 
@@ -2702,6 +2726,15 @@ detail first". Fix: `roadmap add` (allocate, index, detail, wrap), `roadmap move
 (index only; the detail stays), and `roadmap record <ID> --body-file` (replace and wrap the
 evidence).
 
+**Implemented 2026-11-27.** `roadmap add` allocates the ID, writes the `## ID` section and places
+the index row (default: the working section; `--after`/`--before`, `--chain`, `--dry-run`); `move
+<ID> <release>` moves an open row between sections or chains without touching the detail page;
+`record --body-file [--append]` rewrites the evidence, preserving `Commits:` and refusing a retitle
+or a body that carries the line itself. All three wrap at 100 columns through `roadmap_lib.wrap` and
+are exercised in `roadmap selftest` on fixture copies.
+
+Commits: 5fbf5b5, 3d4b544
+
 ## BUILD-131
 
 **The ledger's audit is a parse, not a check** - `docs-check` proves agreement and the `Commits:`
@@ -2711,6 +2744,15 @@ prose exists; the selftest misses `--json`, `--dry-run`, an unknown ID and a mal
 `roadmap audit` (local; hashes, line length, ID references, dropped reason) plus those selftest
 cases; `release-check --open` is the queue-view row.
 
+**Implemented 2026-11-27.** `roadmap audit` checks every recorded hash is reachable from a ref
+(skipped with a printed note on a shallow clone), no detail or screenshot line is over 768 bytes,
+every ID cited in prose is a row, a 🚫/❌ row opens a reason paragraph, and each `ROADMAP.md` chain
+count matches. `ci-check`'s roadmap step and the `Docs` workflow run it; the selftest trips all five
+rules plus a malformed index row, and covers `--json`, `--dry-run` and an unknown ID. Measured 0.1 s
+on the full ledger.
+
+Commits: 5fbf5b5, 3d4b544
+
 ## BUILD-132
 
 **The local gate prints its whole test log on a pass** - the 2026-11-26 full gate printed 6,567
@@ -2718,6 +2760,15 @@ lines (~308 KB), mostly cargo/GUT/smoke output, while a reader needs the named P
 failed step still needs its log. Fix: `ci-check --summary` (or `--quiet`) captures each gate's
 output to a log, prints the named result and the log path, and dumps the log only for a failure;
 `--verbose` keeps today's stream. The pre-push hook prints the same summary.
+
+**Implemented 2026-11-27.** `ci-check --summary` runs each step with its output in
+`/tmp/gpty-ci-check/<step>.log`, prints the named PASS/FAIL/SKIP lines and the directory, and dumps
+a failing step's log; an `if`-guarded brace group keeps `FAILED` and the media/Godot caches while
+letting every gate in a step report. The pre-push hook passes it (`CI_CHECK_VERBOSE=1` streams).
+Measured: `--only docs` prints 13 lines instead of the gate bodies, and the full gate's 6,567-line
+stream becomes one result per gate.
+
+Commits: 5fbf5b5, 3d4b544
 
 ## BUILD-133
 
@@ -2778,6 +2829,14 @@ listing its remaining rows. A reader must run `stats` or open pages to plan. Fix
 the open counts in the release-chain list from `roadmap stats`; add `next --limit/--chain/--area`
 and `release-check --open`; keep the index itself one line per row.
 
+**Implemented 2026-11-27.** `ROADMAP.md`'s release-chain list now carries each page's open count (`-
+planned, 114 open`); `stats --write` writes it and `add`/`move`/`close` refresh it, so the audit
+only catches a hand edit. `next` takes `--limit`, `--chain` and `--area`, and `--json` is a list;
+`release-check --open` prints `N open of M row(s)` and the open rows (id and title) instead of
+failing on them. The counts and the drift trip (`says 9 open`) are in `roadmap selftest`.
+
+Commits: 5fbf5b5, 3d4b544
+
 ## BUILD-137
 
 **`scripts/roadmap show` prints the detail page path with the index row's line number** - measured
@@ -2788,6 +2847,13 @@ ledger.section(row)` (the detail page) and prints `rel(page.path):{row.line}`, p
 path with another file's line. Fix: print `rel(row.page.path):{row.line}` (the index row the
 second line quotes) and leave the detail page path out of the header. Test: extend the `selftest`
 fixture so `show TEST-1` asserts the `v0.0.md` header.
+
+**Implemented 2026-11-27.** `show` prints `rel(row.page.path):{row.line}` above the index row it
+quotes, so the header names the page its line number belongs to. The selftest computes the row's
+line from the written fixture and fails if the header differs or the detail page's path is paired
+with the index line.
+
+Commits: e398461, 3d4b544
 
 ## BUILD-138
 
@@ -2816,3 +2882,39 @@ selftest` fixture for the already-remote case (the split plan is already pure; t
 is the new seam). Tests: a fixture remote containing `w` goes straight to the bot push; a remote
 behind `w` still performs the maintainer push; a branch whose newest commit touches
 `.github/workflows` still refuses.
+
+**Implemented 2026-11-27.** `needs_maintainer <w> <remote>` answers the split's second half from
+`git merge-base --is-ancestor`; `cmd_push` reads the remote head before the dry-run branch, fetches
+the object when it is absent locally, and skips the maintainer push when the remote already carries
+the workflow commit (saying why). `pr selftest` builds a bare remote and covers already-remote,
+behind and empty; the dry run stays offline-capable.
+
+Commits: 46c80ea, 3d4b544
+
+## BUILD-140
+
+**GUT's intermediate-state assertions race the host's frame pace** - found 2026-11-27 on PR #73 and
+the three dependabot PRs: `test_scroll_hints.gd::test_a_chevron_fades_in_and_out` failed on Windows
+with `[1.0] expected to be < than [1.0]` (`it arrives from transparent`, sampled after one frame
+whose delta exceeded the fade),
+`test_concept_graph_editor.gd::test_frame_all_eases_and_off_lands_on_the_same_transform` failed on
+Windows with `the camera moved off its start` (the tween's first step landed after the single
+awaited frame), and `test_wiki_pane.gd::test_a_dragged_node_keeps_its_place_across_a_build` failed
+on macOS with `[683.804138183594] expected to be < than [1.0]` (the drag was placed into a live
+`RigidBody3D` simulation, and the extra physics ticks before the rebuild moved the body). None of
+the four PRs changed GDScript, so the assertions depended on the runner, not the code under test.
+
+Fix: sample an arrival's start before the first frame (`UiMotion.arrive` sets it synchronously),
+wait on wall time rather than a frame count before asserting an ease advanced, and settle a 3D
+graph's simulation (`_settle_now`) after placing a dragged body so the physics is not a second
+author of the position. Tests: the three named tests, in the full suite on Linux and `--dir unit` on
+macOS.
+
+**Corrected 2026-11-27.** The macOS value is identical on every run (`683.804138183594`, two
+separate runs including the merge-queue build), so this was not the frame pace: the second live
+rebuild's *source* was a fresh layout rather than the view's export on that path, and the assertion
+raced the view swap. The test now asserts the handoff at its seam - `export_positions()` into the
+pane's own `_build_graph_document` - which is deterministic and is the contract the test names; the
+settle stays because a finished drag is the state being exported.
+
+Commits: e08a654

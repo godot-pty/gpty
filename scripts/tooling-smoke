@@ -77,7 +77,7 @@ check_fails "dev-linker reports no linker" \
 
 # A compile for the Python tools (no imports executed).
 for f in scripts/render-cost-chart scripts/fix-forensics scripts/check-github-settings \
-    scripts/install-godot scripts/release-prepare; do
+    scripts/install-godot scripts/release-prepare scripts/roadmap_lib.py; do
     check "compile $f" python3 -c \
         'import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)' \
         "$f" "$tmp/$(basename "$f").pyc"
@@ -182,9 +182,140 @@ check_export_gate_fixture() {
 }
 check "export gate fixture" check_export_gate_fixture
 
+# The evidence shape docs-check relies on: a fixture tree that passes, then two
+# trips - a detail line over the 768-byte cap and a screenshot page nothing
+# links. DOCS_ROOT points the gate at the copy, the same seam the roadmap's
+# ROADMAP_ROOT gives its selftest.
+check_docs_evidence_fixture() {
+    local base="$tmp/docs-fixture" out
+    local pass="$base/pass" long="$base/long" nolink="$base/nolink"
+    rm -rf "$base"
+    mkdir -p "$pass/docs/content/docs/roadmap/details" \
+        "$pass/docs/content/docs/roadmap/screenshots" \
+        "$pass/docs/content/docs/changelog" "$pass/docs/content/docs/agents" \
+        "$pass/docs/static/images"
+    printf '# Fixture\n' >"$pass/README.md"
+    cat >"$pass/ROADMAP.md" <<'EOF'
+# Roadmap
+
+The ID prefix names the area (TEST).
+
+## Release chains
+
+- [v0.0 - Fixture](docs/content/docs/roadmap/v0.0.md) - planned
+EOF
+    printf '# Changelog\n\n- [v0.0](docs/content/docs/changelog/v0.0.md)\n' \
+        >"$pass/CHANGELOG.md"
+    printf '# Agents\n\n- [Guide](docs/content/docs/agents/guide.md)\n' >"$pass/AGENTS.md"
+    printf -- '---\ntitle: Roadmap\nweight: 4\n---\n' \
+        >"$pass/docs/content/docs/roadmap/_index.md"
+    cat >"$pass/docs/content/docs/roadmap/v0.0.md" <<'EOF'
+---
+title: "v0.0 - Fixture"
+weight: 10
+---
+
+## v0.0.0 - Fixture
+
+| Done | ID | Item |
+|:---:|:---:|---|
+| ⬜ | [TEST-1](details/test.md#test-1) | **First fixture row** |
+
+Release captures: [v0.0 screenshots](screenshots/v0.0.md#screenshots).
+EOF
+    cat >"$pass/docs/content/docs/roadmap/details/test.md" <<'EOF'
+---
+title: "Roadmap details - TEST"
+weight: 900
+build:
+  list: never
+---
+
+Every TEST row.
+
+## TEST-1
+
+**First fixture row** - first body.
+EOF
+    cat >"$pass/docs/content/docs/roadmap/screenshots/v0.0.md" <<'EOF'
+---
+title: "Roadmap screenshots - v0.0"
+weight: 910
+build:
+  list: never
+---
+
+## Screenshots
+
+No captures yet.
+EOF
+    printf -- '---\ntitle: Changelog\nweight: 5\n---\n' \
+        >"$pass/docs/content/docs/changelog/_index.md"
+    printf -- '---\ntitle: "v0.0 - Fixture"\ndate: 2026-01-01\n---\n\n## v0.0.0\n\n- fixture\n' \
+        >"$pass/docs/content/docs/changelog/v0.0.md"
+    printf -- '---\ntitle: Agents\nweight: 6\n---\n' \
+        >"$pass/docs/content/docs/agents/_index.md"
+    printf -- '---\ntitle: Guide\nweight: 10\n---\n\nNo repo paths named here.\n' \
+        >"$pass/docs/content/docs/agents/guide.md"
+    git -C "$pass" init -q
+    git -C "$pass" add -A
+
+    if ! out="$(env DOCS_ROOT="$pass" ./scripts/docs-check 2>&1)"; then
+        printf 'the fixture tree does not pass docs-check:\n%s\n' "$out"
+        return 1
+    fi
+
+    cp -r "$pass" "$long"
+    printf '%0800d\n' 0 >>"$long/docs/content/docs/roadmap/details/test.md"
+    if out="$(env DOCS_ROOT="$long" ./scripts/docs-check 2>&1)"; then
+        echo "an 800-byte detail line passed docs-check"
+        return 1
+    fi
+    grep -q 'line is 800 bytes (cap 768)' <<<"$out" || {
+        printf 'the long-line message is missing:\n%s\n' "$out"
+        return 1
+    }
+
+    cp -r "$pass" "$nolink"
+    grep -v '^Release captures:' "$pass/docs/content/docs/roadmap/v0.0.md" \
+        >"$nolink/docs/content/docs/roadmap/v0.0.md"
+    if out="$(env DOCS_ROOT="$nolink" ./scripts/docs-check 2>&1)"; then
+        echo "a screenshot page nothing links passed docs-check"
+        return 1
+    fi
+    grep -q 'screenshot page is not linked from any markdown page' <<<"$out" || {
+        printf 'the screenshot-orphan message is missing:\n%s\n' "$out"
+        return 1
+    }
+}
+check "docs-check evidence fixture" check_docs_evidence_fixture
+
 # The static secret gate scans the git index; the full-history scan is gitleaks
 # in .github/workflows/secret-scan.yml.
 check "check-secrets" ./scripts/check-secrets
+
+# The gate must refuse a planted key, and --root is what lets it judge a
+# fixture's index without touching this repository's.
+check_secret_fixture() {
+    local d="$tmp/secrets" out
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
+    rm -rf "$d"
+    mkdir -p "$d"
+    git -C "$d" init -q
+    printf 'TOKEN = "sk_live_%s"\n' "$(printf 'a%.0s' {1..24})" >"$d/leak.txt"
+    git -C "$d" add -A
+    if out="$(./scripts/check-secrets --root "$d" 2>&1)"; then
+        echo "a planted key passed check-secrets"
+        return 1
+    fi
+    grep -q 'Stripe live secret key' <<<"$out" || {
+        printf 'the leaked rule was not named:\n%s\n' "$out"
+        return 1
+    }
+    git -C "$d" rm -q --cached leak.txt
+    ./scripts/check-secrets --root "$d" || return 1
+}
+check "check-secrets fixture" check_secret_fixture
 
 # The PR tool's pure decision functions: the workflow split, the W==HEAD
 # refusal and the land refusals. No gh, no network.
@@ -266,21 +397,53 @@ EOF
     rm -f "$tmp/hook-args"
     printf 'refs/heads/x %s refs/heads/x %s\n' "$(git rev-parse HEAD)" "$(git rev-parse HEAD)" \
         | CI_CHECK_BIN="$stub" githooks/pre-push >/dev/null || return 1
-    [ "$(cat "$tmp/hook-args" 2>/dev/null)" = "--stamped" ] || {
-        echo "the hook did not call ci-check --stamped for a branch ref"
+    [ "$(cat "$tmp/hook-args" 2>/dev/null)" = "--stamped --summary" ] || {
+        echo "the hook did not call ci-check --stamped --summary for a branch ref"
         return 1
     }
     rm -f "$tmp/hook-args"
     printf '%s %s refs/heads/x %s\n' "$(git rev-parse HEAD)" "$(git rev-parse HEAD)" "$(git rev-parse HEAD)" \
         | CI_CHECK_BIN="$stub" githooks/pre-push >/dev/null || return 1
-    [ "$(cat "$tmp/hook-args" 2>/dev/null)" = "--stamped" ] || {
+    [ "$(cat "$tmp/hook-args" 2>/dev/null)" = "--stamped --summary" ] || {
         echo "the hook skipped a raw-SHA branch push"
+        return 1
+    }
+    rm -f "$tmp/hook-args"
+    printf 'refs/heads/x %s refs/heads/x %s\n' "$(git rev-parse HEAD)" "$(git rev-parse HEAD)" \
+        | CI_CHECK_VERBOSE=1 CI_CHECK_BIN="$stub" githooks/pre-push >/dev/null || return 1
+    [ "$(cat "$tmp/hook-args" 2>/dev/null)" = "--stamped" ] || {
+        echo "CI_CHECK_VERBOSE=1 did not restore the stream"
+        return 1
+    }
+}
+
+check_ci_summary() {
+    local out logs="$tmp/ci-logs"
+    out="$(CI_CHECK_LOG_DIR="$logs" ./scripts/ci-check --only docs --summary 2>&1)" || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    grep -qx $'PASS\tdocs-check' "$logs/results" || {
+        echo "the summary lost the named result"
+        return 1
+    }
+    grep -q "full output in $logs" <<<"$out" || {
+        echo "the summary did not name the log directory"
+        return 1
+    }
+    if grep -q 'docs-check: OK' <<<"$out"; then
+        echo "the summary printed a gate's body"
+        return 1
+    fi
+    [ -s "$logs/docs.log" ] || {
+        echo "the step log is missing"
         return 1
     }
 }
 
 check "ci-check --list-steps" check_ci_list_steps
 check "ci-check --only docs" check_ci_only_docs
+check "ci-check --summary" check_ci_summary
 check "ci-check stamp fixture" check_ci_stamp
 check "pre-push refs" check_pre_push_refs
 

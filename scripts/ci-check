@@ -4,6 +4,7 @@ set -euo pipefail
 # ── ci-check: Run all CI checks locally in fast-fail order ──────────────
 # Usage: ./scripts/ci-check [--fast | --classify | --only <id[,id]> | --list-steps]
 #                         [--stamped | --stamp | --stamp-check | --stamp-print]
+#                         [--summary | --verbose]
 #   --fast        the pre-commit subset (media through tooling; no app matrix)
 #   --classify    print the changed set and its class; run nothing
 #   --only ...    run only the named steps in canonical order; never stamps
@@ -12,21 +13,26 @@ set -euo pipefail
 #   --stamp       run the full gate and write the stamp when the tree is clean
 #   --stamp-check report stamp validity without running the gate
 #   --stamp-print print the current stamp fingerprint (tests)
+#   --summary     capture each step's output to a log, print only its named
+#                 PASS/FAIL/SKIP lines and the log directory; a failing step's
+#                 log is dumped. CI_CHECK_LOG_DIR names the directory.
+#   --verbose     stream every gate's output; the default, and cancels --summary
 #   -h|--help     this text
 #   (no flag)     full suite: every step below
 #
 # A docs-class change runs the docs gates only (workflow lint, docs-check, the
-# two bundles, the catalogue and the ledger) in either mode, because nothing it
-# touches can change what the Rust, GDScript or smoke gates test - and CI
+# two bundles, the catalogue, the ledger and the secret scan) in either mode,
+# because nothing it touches can change what the Rust, GDScript or smoke gates
+# test - and CI
 # skips its code workflow for one too (the `changes` job in
 # .github/workflows/ci.yml). A path is docs-class when the only local gate it
 # can influence is a docs/static one. The list is `DOCS_PATTERNS` in
 # `scripts/ci-classes.env`, the same file `scripts/classify-changes` reads for
 # the CI bits: docs, Markdown, the generated bundles, the capability
 # catalogue, the licenses, workflow YAML (lint-only; the app suites cannot
-# exercise a workflow) and the five docs-only scripts (`scripts/docs-check`,
+# exercise a workflow) and the six docs-only scripts (`scripts/docs-check`,
 # `scripts/build-wiki`, `scripts/build-docs`, `scripts/check-capabilities`,
-# `scripts/roadmap`).
+# `scripts/roadmap`, `scripts/roadmap_lib.py`).
 #
 # A tooling-class change runs the docs gates, the cost gates and a syntax/plan
 # check of the tooling scripts themselves, and stops there. It is an
@@ -70,6 +76,8 @@ Usage: scripts/ci-check [--fast | --classify | --only <id[,id]> | --list-steps]
   --stamp       run the full gate and write the stamp when the tree is clean
   --stamp-check report stamp validity without running
   --stamp-print print the current stamp fingerprint (tests)
+  --summary     print each step's named result and log, not every gate's output
+  --verbose     stream every gate's output (default; cancels --summary)
   -h | --help   this text
 
 Steps: media fmt workflows docs capabilities secrets theme guards ffi log lock
@@ -95,6 +103,10 @@ STAMPED=false
 STAMP_AFTER=false
 STAMP_CHECK=false
 STAMP_PRINT=false
+SUMMARY=false
+VERBOSE=false
+SUMMARY_DIR=""
+RESULTS=""
 
 while (($#)); do
     case "$1" in
@@ -114,6 +126,8 @@ while (($#)); do
         --stamp) STAMP_AFTER=true ;;
         --stamp-check) STAMP_CHECK=true ;;
         --stamp-print) STAMP_PRINT=true ;;
+        --summary) SUMMARY=true ;;
+        --verbose) VERBOSE=true ;;
         -h | --help) help ;;
         *) echo "ci-check: unknown argument '$1'" >&2; die_usage ;;
     esac
@@ -132,6 +146,15 @@ if $LIST_STEPS; then
     exit 0
 fi
 
+if $VERBOSE; then SUMMARY=false; fi
+if $SUMMARY; then
+    SUMMARY_DIR="${CI_CHECK_LOG_DIR:-${TMPDIR:-/tmp}/gpty-ci-check}"
+    rm -rf "$SUMMARY_DIR"
+    mkdir -p "$SUMMARY_DIR"
+    RESULTS="$SUMMARY_DIR/results"
+    : >"$RESULTS"
+fi
+
 # ── Color helpers ───────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -139,9 +162,26 @@ YELLOW='\033[0;33m'
 NC='\033[0m'       # No Color
 BOLD='\033[1m'
 
-pass()  { printf "  ${GREEN}PASS${NC} %s\n" "$1"; }
-fail()  { printf "  ${RED}FAIL${NC} %s\n" "$1"; }
-warn()  { printf "  ${YELLOW}SKIP${NC} %s\n" "$1"; }
+result_line() {
+    case "$1" in
+        PASS) printf "  ${GREEN}PASS${NC} %s\n" "$2" ;;
+        FAIL) printf "  ${RED}FAIL${NC} %s\n" "$2" ;;
+        *)    printf "  ${YELLOW}SKIP${NC} %s\n" "$2" ;;
+    esac
+}
+
+# Every named result lands in the summary's record file as well as the stream,
+# so a step whose output was captured can be replayed line by line afterwards.
+emit() {
+    if [[ -n "$RESULTS" ]]; then
+        printf '%s\t%s\n' "$1" "$2" >>"$RESULTS"
+    fi
+    result_line "$1" "$2"
+}
+
+pass()  { emit PASS "$1"; }
+fail()  { emit FAIL "$1"; }
+warn()  { emit SKIP "$1"; }
 header(){ printf "\n${BOLD}── %s ──${NC}\n" "$1"; }
 detail(){ printf "%s\n" "$1" | sed 's/^/    /'; }
 
@@ -407,12 +447,13 @@ run_capability_check() {
 run_roadmap_check() {
     header "roadmap ledger"
     # scripts/roadmap is the reader/writer the next-task loop starts from. The
-    # selftest exercises next/show/close/rearea on a throwaway fixture; stats
-    # parses the real ledger's index and detail pages.
-    if RM_OUT="$(./scripts/roadmap selftest 2>&1 && ./scripts/roadmap stats 2>&1)"; then
+    # selftest exercises every command on a throwaway fixture; audit checks the
+    # real ledger's evidence - recorded hashes, line caps, cited IDs, reasons -
+    # which a parse alone cannot.
+    if RM_OUT="$(./scripts/roadmap selftest 2>&1 && ./scripts/roadmap audit 2>&1)"; then
         pass "roadmap ledger"
     else
-        fail "roadmap ledger — the tool or the index/detail agreement is broken"
+        fail "roadmap ledger — the tool, the evidence or the index/detail agreement is broken"
         detail "$RM_OUT"
         check_failed
     fi
@@ -1000,7 +1041,7 @@ elif [ -z "${CI_CHECK_FULL:-}" ] \
     && { [ -n "${CI_CHECK_RANGE_FROM:-}" ] || ! $CI_MODE; } \
     && docs_class_change; then
     printf "  %bDocs-class change%b — docs gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
-    SELECTED=(workflows docs capabilities cost)
+    SELECTED=(workflows docs capabilities secrets cost)
 elif [ -z "${CI_CHECK_FULL:-}" ] \
     && { [ -n "${CI_CHECK_RANGE_FROM:-}" ] || ! $CI_MODE; } \
     && tooling_class_change; then
@@ -1012,8 +1053,36 @@ else
     SELECTED=("${STEPS[@]}")
 fi
 
+run_step() {
+    local id=$1 log="$SUMMARY_DIR/$1.log" before failed=0
+    if ! $SUMMARY; then
+        "step_$id"
+        return 0
+    fi
+    printf "\n${BOLD}── %s ──${NC}\n" "$id"
+    before=$(wc -l <"$RESULTS")
+    # Braces, not a subshell: FAILED and the media/Godot caches survive. As the
+    # `if` condition, errexit is off inside the step, so every gate in it
+    # reports instead of the first failure ending the run.
+    if ! { "step_$id"; } >"$log" 2>&1; then
+        failed=1
+    fi
+    sed -n "$((before + 1)),\$p" "$RESULTS" | while IFS=$'\t' read -r kind msg; do
+        result_line "$kind" "$msg"
+    done
+    if grep -q $'^FAIL\t' <(sed -n "$((before + 1)),\$p" "$RESULTS"); then
+        failed=1
+    fi
+    if ((failed)); then
+        FAILED=1
+        printf "  ${RED}log${NC} %s\n" "$log"
+        cat "$log"
+    fi
+    return 0
+}
+
 for id in "${SELECTED[@]}"; do
-    "step_$id"
+    run_step "$id"
 done
 
 # ── Summary ────────────────────────────────────────────────────────────
@@ -1030,5 +1099,8 @@ if [[ $FAILED -eq 0 ]]; then
     fi
 else
     printf "${RED}${BOLD}Some checks failed. Fix before pushing.${NC}\n"
+fi
+if $SUMMARY; then
+    printf 'ci-check: full output in %s\n' "$SUMMARY_DIR"
 fi
 exit $FAILED

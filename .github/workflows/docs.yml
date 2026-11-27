@@ -13,6 +13,7 @@ on:
       - "scripts/docs-check"
       - "scripts/check-capabilities"
       - "scripts/roadmap"
+      - "scripts/roadmap_lib.py"
       # The knowledge bundle ships inside the app and is generated from
       # `docs/content/wiki`, so a wiki-only commit changes this file and must
       # still be validated here - CI ignores documentation-only pushes.
@@ -43,6 +44,7 @@ on:
       - "scripts/docs-check"
       - "scripts/check-capabilities"
       - "scripts/roadmap"
+      - "scripts/roadmap_lib.py"
       - "godot/knowledge.json"
       - "scripts/build-wiki"
       # The documentation bundle ships inside the app too, generated from the
@@ -105,10 +107,11 @@ jobs:
         run: ./scripts/docs-check
 
       # The ledger CLI is what the next-task loop reads. The selftest exercises
-      # next/show/close/rearea on a throwaway fixture; stats parses the real
-      # index and detail pages. No writes outside the fixture.
+      # every command on a throwaway fixture; audit checks the real ledger's
+      # evidence, and a shallow clone skips only its commit-hash half. No
+      # writes outside the fixture.
       - name: Check the roadmap ledger
-        run: ./scripts/roadmap selftest && ./scripts/roadmap stats
+        run: ./scripts/roadmap selftest && ./scripts/roadmap audit
 
       # The catalogue is data, not markdown (docs-check skips docs/data/), so
       # nothing else reads it. It stats every evidence path and joins every
