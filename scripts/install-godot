@@ -54,6 +54,8 @@ def platform_key() -> str:
         return "linux-x86_64"
     if system == "Windows" and machine in ("amd64", "x86_64"):
         return "windows-x86_64"
+    if system == "Darwin" and machine == "arm64":
+        return "macos-arm64"
     fail(f"unsupported editor platform {system}/{machine}", 2)
 
 
@@ -88,8 +90,8 @@ def download(url: str, expected: str, destination: Path) -> None:
 
 
 def ensure_alias(destination: Path, executable: Path) -> None:
-    """Expose the versioned archive as `godot` / `godot.exe` on PATH."""
-    alias = destination / ("godot.exe" if os.name == "nt" else "godot")
+    """Expose the versioned archive as `godot` / `godot.exe` beside it."""
+    alias = executable.parent / ("godot.exe" if os.name == "nt" else "godot")
     if alias.exists() and not alias.is_symlink():
         return
     if alias.is_symlink():
@@ -112,7 +114,7 @@ def install_editor(dest_arg: str) -> Path:
     if executable.is_file():
         ensure_alias(destination, executable)
         print(executable)
-        append_path(str(destination))
+        append_path(str(executable.parent))
         append_env("GODOT", str(executable))
         return executable
 
@@ -128,7 +130,7 @@ def install_editor(dest_arg: str) -> Path:
         executable.chmod(0o755)
     ensure_alias(destination, executable)
     print(executable)
-    append_path(str(destination))
+    append_path(str(executable.parent))
     append_env("GODOT", str(executable))
     return executable
 

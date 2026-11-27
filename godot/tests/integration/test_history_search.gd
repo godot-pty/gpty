@@ -53,7 +53,6 @@ func test_punctuated_queries_find_stored_lines():
 			"'%s' must find the stored line, not silently return nothing" % pattern
 		)
 	assert_eq(body._search_error, "", "a findable query must not report an error")
-	await get_tree().create_timer(2.1).timeout
 
 func test_no_match_explains_itself():
 	var body = await _pane_with_marker()
@@ -67,7 +66,6 @@ func test_no_match_explains_itself():
 		body._history_list.get_child_count(), 0,
 		"an explanation row must be present when nothing matches"
 	)
-	await get_tree().create_timer(2.1).timeout
 
 func test_unsearchable_input_is_not_an_error():
 	# Punctuation-only input reduces to no terms: empty, but not a failure.
@@ -75,7 +73,6 @@ func test_unsearchable_input_is_not_an_error():
 	body._do_history_search("*")
 	assert_eq(body._history_results.size(), 0)
 	assert_eq(body._search_error, "", "punctuation-only input is an empty search, not an error")
-	await get_tree().create_timer(2.1).timeout
 
 
 # ── The keyboard path through the History scope ─────────────────────────
@@ -172,7 +169,6 @@ func test_the_result_rows_are_tab_stops_and_the_arrows_move_the_cursor():
 	await _press_key(KEY_UP)
 	assert_eq(body._history_cursor, 0)
 	assert_false(rows[1].button_pressed, "moving off a row clears its selected treatment")
-	await get_tree().create_timer(2.1).timeout
 
 func test_enter_copies_the_cursor_row_and_escape_closes_the_strip():
 	var body = await _history_rows_pane()
@@ -187,13 +183,11 @@ func test_enter_copies_the_cursor_row_and_escape_closes_the_strip():
 	assert_false(body._search_visible, "Escape closes the strip")
 	assert_true(body.has_focus(), "and hands the keyboard back to the pane")
 	ToastManager.toast_requested.disconnect(record)
-	await get_tree().create_timer(2.1).timeout
 
 func test_up_from_an_unselected_list_starts_at_the_last_row():
 	var body = await _history_rows_pane()
 	await _press_key(KEY_UP)
 	assert_eq(body._history_cursor, 1, "Up from nothing selects the last row")
-	await get_tree().create_timer(2.1).timeout
 
 func test_a_focused_row_moves_the_cursor_with_the_arrows():
 	var body = await _history_rows_pane()
@@ -208,7 +202,6 @@ func test_a_focused_row_moves_the_cursor_with_the_arrows():
 	await _press_key(KEY_UP)
 	assert_same(get_viewport().gui_get_focus_owner(), rows[0])
 	assert_eq(body._history_cursor, 0)
-	await get_tree().create_timer(2.1).timeout
 
 ## The reported defect: Up/Down in the field reached the pane's keymap, which
 ## sent an arrow to the child and reset the scroll. The view offset is the
@@ -227,4 +220,3 @@ func test_the_arrows_never_reach_the_child_while_the_strip_is_open():
 		"an arrow in the strip must not reach the child and snap the view to the bottom")
 	assert_eq(after, offset,
 		"no output arrived during the key, so the view cannot have been anchored forward")
-	await get_tree().create_timer(2.1).timeout

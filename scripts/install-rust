@@ -18,8 +18,16 @@ dir="$ROOT"
 targets=()
 print_only=false
 
+usage() {
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h | --help)
+            usage
+            exit 0
+            ;;
         --manifest-path)
             [[ $# -ge 2 ]] || { echo "install-rust: --manifest-path needs a directory" >&2; exit 2; }
             case "$2" in

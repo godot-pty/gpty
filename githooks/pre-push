@@ -1,34 +1,52 @@
 #!/usr/bin/env bash
 # pre-push: CI suite before pushing
-# Delegates to scripts/ci-check (full mode). The pushed range is handed over as
+# Delegates to scripts/ci-check --stamped. The pushed range is handed over as
 # CI_CHECK_RANGE_FROM so a documentation-only push can narrow to the docs gates
 # (scripts/ci-check decides; CI_CHECK_FULL=1 forces the full suite). Git writes
 # one line per ref to stdin: <local ref> <local sha> <remote ref> <remote sha>.
-# A new branch has no remote base, so it is classified against its merge-base
-# with origin/main; a missing base or a multi-ref push still means the full
-# suite.
+#
+# Tags and branch deletes never need the app matrix: a tag is validated by the
+# release workflow, and a delete changes no source. A new branch has no remote
+# base, so it is classified against its merge-base with origin/main; a missing
+# base or a multi-ref push still means the full suite. The --stamped path lets a
+# repeated push of the same clean tree skip the suite it already passed.
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-CI_CHECK="$REPO_ROOT/scripts/ci-check"
+CI_CHECK="${CI_CHECK_BIN:-$REPO_ROOT/scripts/ci-check}"
 
 RANGE_FROM=""
 RANGE_USABLE=true
 REFS=0
 LOCAL_SHA=""
-while read -r _local_ref local_sha _remote_ref remote_sha; do
+while read -r _local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
+        refs/heads/*) ;;
+        *)
+            echo "pre-push: $remote_ref is not a branch - no gate"
+            continue
+            ;;
+    esac
+    if [[ "$local_sha" =~ ^0+$ ]]; then
+        echo "pre-push: deleting $remote_ref - no gate"
+        continue
+    fi
     REFS=$((REFS + 1))
     LOCAL_SHA="$local_sha"
     if [[ -z "$remote_sha" || "$remote_sha" =~ ^0+$ ]]; then
         RANGE_USABLE=false
-        break
+        continue
     fi
     if [[ -z "$RANGE_FROM" ]]; then
         RANGE_FROM="$remote_sha"
     elif [[ "$RANGE_FROM" != "$remote_sha" ]]; then
         RANGE_USABLE=false
-        break
     fi
 done
+
+if [[ $REFS -eq 0 ]]; then
+    exit 0
+fi
+
 if ! $RANGE_USABLE && [[ $REFS -eq 1 && -n "$LOCAL_SHA" ]]; then
     if BASE="$(git merge-base "$LOCAL_SHA" origin/main 2>/dev/null)" && [[ -n "$BASE" ]]; then
         RANGE_FROM="$BASE"
@@ -40,7 +58,7 @@ if $RANGE_USABLE && [[ -n "$RANGE_FROM" ]]; then
 fi
 
 if [[ -x "$CI_CHECK" ]]; then
-    "$CI_CHECK"
+    "$CI_CHECK" --stamped
     STATUS=$?
     if [[ $STATUS -ne 0 ]]; then
         echo ""

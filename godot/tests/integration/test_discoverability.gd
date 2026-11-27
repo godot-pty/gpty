@@ -26,9 +26,6 @@ func before_each():
 	await get_tree().process_frame
 
 func after_each():
-	# Wait out the deferred concept push timer before freeing, so it cannot
-	# resume against a freed workspace.
-	await get_tree().create_timer(2.1).timeout
 	# Free synchronously while the mocks are still active: `_exit_tree()` would
 	# otherwise write the real workspace store after teardown restores it.
 	if _ws:

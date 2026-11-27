@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Run a Godot import/export command and judge its SCRIPT ERROR lines.
+#
+# Usage: scripts/export-check <label> -- <command...>
+#        scripts/export-check --check-log <file>
+#        scripts/export-check -h|--help
+#
+# The release import/export pass prints import-order noise while the shipped
+# app itself starts clean. This gate keeps the four known SCRIPT ERROR classes
+# as a closed list, plus the dependent scripts those classes make unloadable;
+# a new class or a new failed script fails the step. Do not widen either list
+# without a log line proving the new line is also import-order noise.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+ALLOWED=(
+    'Could not resolve class "BasePersistenceManager"'
+    'Identifier "GptyTerminal" not declared'
+    'Could not find type'
+    'Cannot infer the type of "failure" variable'
+)
+
+# The scripts whose load fails because the classes above were not resolved
+# during the import pass. A new name here is a real failure until proven noise.
+ALLOWED_FAILED=(
+    'Failed to load script "res://scenes/terminal/workspace.gd"'
+    'Failed to load script "res://scenes/autoloads/settings_manager.gd"'
+    'Failed to load script "res://scenes/autoloads/profile_manager.gd"'
+    'Failed to load script "res://scenes/autoloads/concept_manager.gd"'
+    'Failed to load script "res://scenes/autoloads/update_checker.gd"'
+    'Failed to load script "res://scenes/autoloads/workspace_store.gd"'
+    'Failed to load script "res://scenes/autoloads/pane_env_store.gd"'
+    'Failed to load script "res://scenes/autoloads/pane_cwd_store.gd"'
+    'Failed to load script "res://scenes/autoloads/pane_scheme_store.gd"'
+    'Failed to load script "res://scenes/autoloads/pane_inspector_store.gd"'
+    'Failed to load script "res://scenes/autoloads/trusted_store.gd"'
+    'Failed to load script "res://scenes/autoloads/link_weights_store.gd"'
+    'Failed to load script "res://scenes/autoloads/saved_command_store.gd"'
+    'Failed to load script "res://scenes/autoloads/knowledge_store.gd"'
+    'Failed to load script "res://scenes/autoloads/vault_registry.gd"'
+)
+
+usage() {
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+judge() {
+    local label="$1" log="$2" bad=0 line pat ok
+    while IFS= read -r line; do
+        if [[ "$line" == *"SCRIPT ERROR"* ]]; then
+            ok=0
+            for pat in "${ALLOWED[@]}"; do
+                if [[ "$line" == *"$pat"* ]]; then
+                    ok=1
+                    break
+                fi
+            done
+        elif [[ "$line" == *"Failed to load script"* ]]; then
+            ok=0
+            for pat in "${ALLOWED_FAILED[@]}"; do
+                if [[ "$line" == *"$pat"* ]]; then
+                    ok=1
+                    break
+                fi
+            done
+        else
+            continue
+        fi
+        if ((!ok)); then
+            printf 'export-check: %s: %s\n' "$label" "$line" >&2
+            bad=1
+        fi
+    done <"$log"
+    return "$bad"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+if [[ "${1:-}" == "--check-log" ]]; then
+    [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+    [[ -f "$2" ]] || { echo "export-check: $2 is not a file" >&2; exit 2; }
+    judge "$2" "$2"
+    exit $?
+fi
+
+if [[ $# -lt 3 || "$2" != "--" ]]; then
+    usage >&2
+    exit 2
+fi
+label="$1"
+shift 2
+
+log="$(mktemp)"
+trap 'rm -f "$log"' EXIT
+set +e
+"$@" 2>&1 | tee "$log"
+status=${PIPESTATUS[0]}
+set -e
+if [[ $status -ne 0 ]]; then
+    exit "$status"
+fi
+judge "$label" "$log"

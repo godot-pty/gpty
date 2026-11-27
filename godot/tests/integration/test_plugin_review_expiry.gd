@@ -120,7 +120,6 @@ func test_accepting_a_review_records_its_revision_and_plans():
 	# The accepted install schedules a deferred store re-read; let it land
 	# while the mock is still installed (the workspace tear-down would leave
 	# the callback on a freed object otherwise).
-	await get_tree().create_timer(2.1).timeout
 
 # ── Same-name profile replacement ──────────────────────────────────────
 
@@ -140,7 +139,6 @@ func test_the_review_names_a_user_profile_it_will_replace():
 	assert_string_contains(AppDialog.body_of(dialog),
 		"Replaces your profile(s): Agent Workspace",
 		"the review is the consent surface for the replacement")
-	await get_tree().create_timer(2.1).timeout
 
 func test_accepting_a_replacement_deletes_the_profile_after_the_plugin_lands():
 	var ws := await _make_workspace()
@@ -161,9 +159,8 @@ func test_accepting_a_replacement_deletes_the_profile_after_the_plugin_lands():
 		"plugin_id": "owner/demo", "revision": "abc1234",
 		"name": "Agent Workspace", "tiles": [],
 	}])
-	await get_tree().create_timer(2.1).timeout
-
-	assert_eq(ProfileManager.find_user_profile("Agent Workspace"), -1,
+	assert_true(await TestWaits.until(
+		func(): return ProfileManager.find_user_profile("Agent Workspace") == -1, 5.0),
 		"the user's copy is gone once the plugin really landed")
 	var plugin_rows := 0
 	for profile in ProfileManager.get_all_profiles():
@@ -187,7 +184,9 @@ func test_a_failed_install_does_not_delete_the_user_profile():
 
 	# No plugin record ever appears.
 	ProfileManager.plugin_profiles_source = func(): return "[]"
-	await get_tree().create_timer(2.1).timeout
+	assert_true(await TestWaits.until(
+		func(): return ws._pending_profile_replacements.is_empty(), 5.0),
+		"the deferred refresh must settle the pending replacement")
 
 	assert_ne(ProfileManager.find_user_profile("Agent Workspace"), -1,
 		"an install that never landed must leave the user's profile alone")

@@ -5,8 +5,8 @@ extends GutTest
 # already shows the same file is focused instead of duplicated — a viewer's
 # scroll, selection and mode belong to its document.
 #
-# One workspace for the whole script, like `test_pane_close_guard.gd`: each
-# instance schedules a deferred concept push 2 s after `_ready`. The panes
+# One workspace for the whole script, like `test_pane_close_guard.gd`; its
+# deferred settle timer is a child and is freed with it. The panes
 # here hold no PTYs; the workspace's own startup terminal is reset after each
 # test, so nothing accumulates.
 
@@ -36,8 +36,6 @@ func before_all():
 
 
 func after_all():
-	# Let the workspace's deferred concept push land while it is still alive.
-	await get_tree().create_timer(2.1).timeout
 	remove_child(_ws)
 	_ws.free()
 	_ws = null

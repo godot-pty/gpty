@@ -3,6 +3,12 @@
 # `GPTY_GIT_TOKEN_FILE` is the maintainer's credential (the workflow split);
 # `GPTY_BOT_TOKEN_FILE` is the gpty-bot installation token (the final push).
 set -euo pipefail
+case "${1:-}" in
+    -h | --help)
+        sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'
+        exit 0
+        ;;
+esac
 if [ -n "${GPTY_GIT_TOKEN_FILE:-}" ] && [ -f "$GPTY_GIT_TOKEN_FILE" ]; then
     cat "$GPTY_GIT_TOKEN_FILE"
 elif [ -n "${GPTY_BOT_TOKEN_FILE:-}" ] && [ -f "$GPTY_BOT_TOKEN_FILE" ]; then

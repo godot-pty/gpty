@@ -34,6 +34,19 @@ func after_each():
 		_ws = null
 	MockAutoloads.teardown()
 
+func test_a_workspace_freed_while_settling_raises_no_engine_error():
+	# The deferred concept push waits 2 s; a scene-tree timer would resume the
+	# coroutine on the freed workspace and GUT would count the engine error as
+	# a test failure. The settle timer must be a child that dies with it.
+	MockAutoloads.set_store(WorkspaceStore.FILE, {"active": 0, "workspaces": []})
+	var ws = WorkspaceScript.new()
+	add_child(ws)
+	await get_tree().process_frame
+	remove_child(ws)
+	ws.free()
+	await get_tree().create_timer(2.2).timeout
+	pass_test("no late deferred callback after free")
+
 func test_a_spawned_terminal_gets_global_settings():
 	# A fresh launch has no workspace; seed one empty workspace so the spawn has
 	# a target, then prove the user-initiated spawn gets the global settings.
@@ -53,8 +66,6 @@ func test_a_spawned_terminal_gets_global_settings():
 	assert_eq(body.cursor_shape, 1, "spawned terminal should get cfg cursor shape")
 	var tb = ws._tm.tiles[-1].wrapper.get_node_or_null("BodyVBox/TitleBar")
 	assert_false(tb.visible, "spawned titlebar should be hidden when cfg_show_titlebar is false")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_a_workspace_the_store_kept_empty_stays_empty():
 	# `WorkspaceStore` writes `layout: []` for a workspace whose panes the user
@@ -74,8 +85,6 @@ func test_a_workspace_the_store_kept_empty_stays_empty():
 	assert_eq(ws._tm.tiles.size(), 0, "a saved empty layout restores no panes")
 	ws._apply_layout()
 	assert_true(ws._empty_state.visible, "the empty-state guide takes the grid")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_a_settings_save_reaches_a_hidden_workspace():
 	# A workspace switch no longer re-applies settings to the incoming panes, so
@@ -104,8 +113,6 @@ func test_a_settings_save_reaches_a_hidden_workspace():
 	var tb = ws._workspaces[1].tm.tiles[0].wrapper.get_node_or_null("BodyVBox/TitleBar")
 	assert_not_null(tb, "the hidden pane keeps its title bar node")
 	assert_true(tb.visible, "the hidden pane's title bar took the setting too")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 ## The effect keys ride `apply_to_terminal` with every other global appearance
 ## setting: a save reaches a terminal in a workspace the user is not looking at,
@@ -138,7 +145,6 @@ func test_a_settings_save_broadcasts_the_effect_to_every_terminal():
 	for body in bodies:
 		assert_eq(body.effect, "grain", "the terminal took the effect id")
 		assert_eq(body.effect_intensity, UiEffects.FULL, "and its intensity")
-	await get_tree().create_timer(2.1).timeout
 
 ## The concept -> cue glue: a mapped concept cues the pane it fired in, an
 ## unmapped one draws nothing, and the cue is display-only (no store write).
@@ -168,7 +174,6 @@ func test_a_mapped_concept_cues_its_source_pane():
 		"an unmapped concept draws nothing")
 	assert_true(SettingsManager.cfg_reactive_effects.has("cat_command"),
 		"the cue never feeds back into the mapping store")
-	await get_tree().create_timer(2.1).timeout
 
 ## The bodies of every terminal in every workspace, the same walk the settings
 ## broadcast uses.
@@ -209,8 +214,6 @@ func test_a_non_visual_settings_save_repaints_no_terminal():
 	for body in bodies:
 		assert_eq(body._full_repaints, 0,
 			"a save that changes no draw-read value must not repaint")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_a_font_size_change_repaints_each_terminal_once():
 	var bodies = await _two_workspaces_of_terminals()
@@ -223,8 +226,6 @@ func test_a_font_size_change_repaints_each_terminal_once():
 		SettingsManager.apply_to_terminal(body)
 		assert_eq(body._full_repaints, 1,
 			"the setter's metric repack is the one repaint, not a second from apply_settings")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 ## `SELECTION`, `TERMINAL_FOCUS` and `SCROLLBACK_INDICATOR` are the same value
 ## in both palette sets, so a mode switch changes nothing a terminal draws; the
@@ -237,8 +238,6 @@ func test_an_appearance_change_repaints_no_terminal():
 	for body in bodies:
 		assert_eq(body._full_repaints, 0,
 			"an appearance change moves no terminal colour, so it must repaint none")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_profile_activation_respects_show_titlebar():
 	var ws = WorkspaceScript.new()
@@ -258,8 +257,6 @@ func test_profile_activation_respects_show_titlebar():
 	var tb = tm.tiles[0].wrapper.get_node_or_null("BodyVBox/TitleBar")
 	assert_not_null(tb, "titlebar node should exist")
 	assert_false(tb.visible, "profile-activated titlebar should be hidden when cfg_show_titlebar is false")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_click_activates_non_terminal_pane():
 	var ws = WorkspaceScript.new()
@@ -307,8 +304,6 @@ func test_click_activates_non_terminal_pane():
 	ws._input(ev)
 	assert_eq(tm.last_body, terminal_body,
 		"clicking the terminal must make it the active pane")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 ## The view refresh runs on every workspace switch and profile activation,
 ## and the active pane may be a read-only one. It used to call
@@ -330,8 +325,6 @@ func test_applying_the_active_workspace_view_keeps_a_read_only_pane_active():
 	ws._apply_active_workspace_view()
 	assert_eq(ws._tm.last_body, body,
 		"refreshing the view must not drop the active read-only pane")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_add_workspace_starts_blank():
 	var ws = WorkspaceScript.new()
@@ -346,8 +339,6 @@ func test_add_workspace_starts_blank():
 	var new_ws: Dictionary = ws._workspaces[1]
 	assert_eq((new_ws.tm as TerminalManager).tiles.size(), 0,
 		"a new workspace must be a blank slate — no auto-spawned terminal")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_profile_accent_follows_the_active_workspace():
 	var ws = WorkspaceScript.new()
@@ -386,8 +377,6 @@ func test_profile_accent_follows_the_active_workspace():
 	ws._switch_workspace(0)
 	assert_eq(ws._active_profile, "P1", "W1's accent survives W2's reset")
 
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 ## The sidebar's arrow opens a profile in its own workspace. Nothing in the
 ## active workspace may move: its tiles, its directory and its own profile
@@ -432,8 +421,6 @@ func test_profile_opened_in_a_new_workspace_leaves_the_current_one_alone():
 	await get_tree().process_frame
 	assert_eq(str(ws._workspaces[2].name), "Fresh 2")
 
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 ## At the cap the action is refused before anything is created or replaced: a
 ## ninth tab cannot exist, and the profile's tiles must not fall through into
@@ -467,8 +454,6 @@ func test_profile_opened_at_the_workspace_cap_is_refused():
 		"the refused profile must not be applied to the active workspace")
 	assert_eq(ws._active, cap - 1, "the active workspace must not change")
 
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_pane_run_executes_through_configured_shell():
 	var ws = WorkspaceScript.new()
@@ -496,8 +481,6 @@ func test_pane_run_executes_through_configured_shell():
 
 	var err = WorkspaceIpcHandlers.handle(ws, "paneRun", {"command": "   "})
 	assert_true(err is Dictionary and err.has("error"), "empty command must error")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_ui_colors_apply_live_to_existing_wrappers():
 	var ws = WorkspaceScript.new()
@@ -530,8 +513,6 @@ func test_ui_colors_apply_live_to_existing_wrappers():
 		"pane titlebar bg must update live on existing panes")
 	assert_eq(ws._sidebar_bg.color, Color(0.1, 0.1, 0.9),
 		"sidebar bg must update live")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_pane_status_includes_agent_state():
 	var ws = WorkspaceScript.new()
@@ -549,8 +530,6 @@ func test_pane_status_includes_agent_state():
 	assert_eq(str(st.get("agent_state", "")), "idle",
 		"a fresh terminal must report idle agent state")
 	assert_true(st.has("agent_state_tier"), "paneStatus must expose the detection tier")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_pane_settings_open_above_second_workspace_grid():
 	var ws = WorkspaceScript.new()
@@ -570,8 +549,6 @@ func test_pane_settings_open_above_second_workspace_grid():
 	assert_true(panel.visible, "pane settings popup must open on a non-first workspace")
 	assert_gt(panel.z_index, ws._grid.z_index,
 		"overlay panels must render above later-added workspace grids")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_search_button_opens_active_terminal_search():
 	var ws = WorkspaceScript.new()
@@ -586,8 +563,6 @@ func test_search_button_opens_active_terminal_search():
 	var body = tm._find_body(tm.tiles[0].wrapper)
 	assert_true(body is TerminalPane, "startup must spawn a terminal")
 	assert_true(body._search_visible, "search button must open the terminal search UI")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_search_bar_is_a_compact_strip_at_the_pane_top():
 	var ws = WorkspaceScript.new()
@@ -617,8 +592,6 @@ func test_search_bar_is_a_compact_strip_at_the_pane_top():
 	assert_gte(body._history_panel.position.y, strip_rect.size.y + 6.0,
 		"the results panel hangs below the strip")
 	assert_lt(body._history_panel.size.y, 250.0, "the results panel is bounded")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 ## `n/m` on the strip, both step directions, and the engine's refusal shown as
 ## words instead of an invisible `_search_error`.
@@ -661,7 +634,6 @@ func test_search_shows_the_match_count_and_steps_both_ways():
 	body._on_scope_toggled()
 	assert_false(body._search_count.visible,
 		"the history scope's own panel carries its answer")
-	await get_tree().create_timer(2.1).timeout
 
 ## A spawn, a swap and a close are visible in the grid; a toast that repeats
 ## them is noise. The refusal below is the positive control: same recorder,
@@ -697,7 +669,6 @@ func test_spawn_swap_and_close_do_not_toast():
 	assert_true(ws._workspaces.is_empty(), "the last workspace is discardable")
 	assert_eq(seen.size(), 0,
 		"closing the last workspace is visible in the sidebar, not a toast")
-	await get_tree().create_timer(2.1).timeout
 
 func test_a_first_run_has_no_workspace_and_no_pane():
 	MockAutoloads.remove_store(WorkspaceStore.FILE)
@@ -715,7 +686,6 @@ func test_a_first_run_has_no_workspace_and_no_pane():
 		"no workspace, no close-all")
 	assert_true(ws._sidebar._workspaces_add_btn.visible, "the add button remains")
 	assert_false(ws._sidebar._pane_heading.visible, "no panes, no heading")
-	await get_tree().create_timer(2.1).timeout
 
 func test_an_empty_saved_store_does_not_reimport_the_legacy_layout():
 	# Close-all persists `workspaces: []`, and the pre-workspaces `layout.json`
@@ -735,7 +705,6 @@ func test_an_empty_saved_store_does_not_reimport_the_legacy_layout():
 	assert_eq(ws._workspaces.size(), 0, "the saved empty set is not a first run")
 	assert_eq(ws._tm.tiles.size(), 0, "the legacy layout's panes are not spawned")
 	assert_true(ws._empty_state.visible, "the empty-state guide takes the grid")
-	await get_tree().create_timer(2.1).timeout
 
 func test_a_missing_store_still_imports_the_legacy_layout():
 	# The migration is still a first-run path: no store file at all means the
@@ -753,7 +722,6 @@ func test_a_missing_store_still_imports_the_legacy_layout():
 	assert_eq(ws._workspaces.size(), 1, "the legacy layout becomes Workspace 1")
 	assert_eq(str(ws._workspaces[0].name), "Workspace 1")
 	assert_eq(ws._tm.tiles.size(), 1, "its pane is restored")
-	await get_tree().create_timer(2.1).timeout
 
 func test_the_first_pane_creates_the_default_workspace():
 	MockAutoloads.set_store(WorkspaceStore.FILE, {"active": 0, "workspaces": []})
@@ -768,7 +736,6 @@ func test_the_first_pane_creates_the_default_workspace():
 	assert_eq(str(ws._workspaces[0].name), "Default")
 	assert_eq(ws._tm.tiles.size(), 1)
 	assert_false(ws._empty_state.visible, "the guide leaves")
-	await get_tree().create_timer(2.1).timeout
 
 func test_the_add_button_creates_default_from_zero():
 	MockAutoloads.set_store(WorkspaceStore.FILE, {"active": 0, "workspaces": []})
@@ -782,7 +749,6 @@ func test_the_add_button_creates_default_from_zero():
 	assert_eq(str(ws._workspaces[0].name), "Default")
 	assert_eq(ws._tm.tiles.size(), 0, "the add button creates a blank workspace")
 	assert_true(ws._empty_state.visible, "the guide stays until a pane exists")
-	await get_tree().create_timer(2.1).timeout
 
 func test_closing_the_last_workspace_enters_the_empty_state():
 	var ws = WorkspaceScript.new()
@@ -799,7 +765,6 @@ func test_closing_the_last_workspace_enters_the_empty_state():
 	assert_eq(ws._sidebar._workspace_list.get_child_count(), 0, "no rows remain")
 	assert_false(ws._sidebar._workspaces_close_all_btn.visible,
 		"the close-all trash disappears with the last workspace")
-	await get_tree().create_timer(2.1).timeout
 
 func test_the_panes_title_row_closes_all_panes():
 	var ws = WorkspaceScript.new()
@@ -822,7 +787,6 @@ func test_the_panes_title_row_closes_all_panes():
 	assert_eq(ws._tm.tiles.size(), 0, "every pane is gone")
 	assert_true(ws._empty_state.visible)
 	assert_false(ws._sidebar._pane_heading.visible, "the empty section has no heading")
-	await get_tree().create_timer(2.1).timeout
 
 func test_the_workspaces_title_row_closes_all_workspaces():
 	var ws = WorkspaceScript.new()
@@ -846,7 +810,6 @@ func test_the_workspaces_title_row_closes_all_workspaces():
 	assert_eq(ws._tm.tiles.size(), 0)
 	assert_true(ws._empty_state.visible)
 	assert_false(ws._sidebar._workspaces_close_all_btn.visible)
-	await get_tree().create_timer(2.1).timeout
 
 func test_the_workspace_menu_lists_rename_directory_and_clear():
 	var ws = WorkspaceScript.new()
@@ -883,7 +846,6 @@ func test_the_workspace_menu_lists_rename_directory_and_clear():
 	assert_string_contains(menu.get_item_tooltip(2), "Close every pane")
 	assert_not_null(menu.get_item_icon(2), "the trash glyph is a menu icon")
 	menu.queue_free()
-	await get_tree().create_timer(2.1).timeout
 
 func test_the_workspace_menu_rename_opens_the_inline_editor():
 	var ws = WorkspaceScript.new()
@@ -910,7 +872,6 @@ func test_the_workspace_menu_rename_opens_the_inline_editor():
 	le.text_submitted.emit("Renamed")
 	assert_eq(str(ws._workspaces[0].get("name", "")), "Renamed",
 		"the editor commits through the workspace's rename path")
-	await get_tree().create_timer(2.1).timeout
 
 func test_clearing_a_hidden_workspace_does_not_switch():
 	var ws = WorkspaceScript.new()
@@ -932,7 +893,6 @@ func test_clearing_a_hidden_workspace_does_not_switch():
 	assert_eq(ws._workspaces.size(), 2, "and not removed")
 	assert_eq(ws._active, active_before, "the active workspace never switched")
 	assert_eq(str(first.get("profile", "")), "", "a cleared workspace loses its profile")
-	await get_tree().create_timer(2.1).timeout
 
 func test_profile_activation_refreshes_layout_and_pane_list():
 	var ws = WorkspaceScript.new()
@@ -961,8 +921,6 @@ func test_profile_activation_refreshes_layout_and_pane_list():
 	var w0: Control = tm.tiles[0].wrapper
 	assert_gt(w0.offset_right - w0.offset_left, 100.0,
 		"activated wrapper must be laid out with real width")
-	# Wait out the deferred concept push timer so it doesn't resume after free.
-	await get_tree().create_timer(2.1).timeout
 
 
 func test_killing_the_focused_pane_hands_focus_to_the_last_survivor():
@@ -1001,7 +959,6 @@ func test_killing_the_focused_pane_hands_focus_to_the_last_survivor():
 	assert_ne(survivor, first, "not the first pane in the list")
 	assert_true(survivor.has_focus(), "the surviving terminal must hold keyboard focus")
 
-	await get_tree().create_timer(2.1).timeout
 
 func test_closing_the_active_pane_records_a_read_only_last_pane():
 	# A read-only survivor cannot take the keyboard, but it is still the active
@@ -1030,7 +987,6 @@ func test_closing_the_active_pane_records_a_read_only_last_pane():
 	assert_null(ws.get_viewport().gui_get_focus_owner(),
 		"and it releases the keyboard instead of grabbing it")
 
-	await get_tree().create_timer(2.1).timeout
 
 
 func test_restore_renames_duplicate_attachment_ids():
@@ -1062,7 +1018,6 @@ func test_restore_renames_duplicate_attachment_ids():
 	assert_eq(ids[0], "shared-id", "the first pane keeps the saved id")
 	assert_ne(ids[1], "", "the renamed pane must still have an id")
 
-	await get_tree().create_timer(2.1).timeout
 
 ## A restored layout must end up the same *size on screen* as it was saved.
 ##
@@ -1245,8 +1200,6 @@ func test_an_emptied_workspace_shows_the_guide():
 	var body = ws._tm._find_body(ws._tm.tiles[0].wrapper)
 	assert_true(body is CodeViewerPane, "the code-viewer step starts a code viewer")
 
-	# Wait out the deferred concept push so it cannot resume after the free.
-	await get_tree().create_timer(2.1).timeout
 
 func test_the_empty_guide_scrolls_at_the_layout_floor():
 	var ws = WorkspaceScript.new()
@@ -1268,7 +1221,6 @@ func test_the_empty_guide_scrolls_at_the_layout_floor():
 	assert_true(empty.get_v_scroll_bar().max_value > empty.size.y,
 		"the atlas scrolls instead of clipping at the layout floor")
 
-	await get_tree().create_timer(2.1).timeout
 
 ## The row's end-to-end proof: a mode change through the settings save re-themes
 ## the live window - the one Theme, the clear colour, the user-coloured chrome
@@ -1309,8 +1261,6 @@ func test_the_chrome_follows_the_appearance_mode_live():
 	assert_eq(panel.bg_color, UiPalette.dark().SURFACE, "and back again")
 	assert_eq(sb.bg_color, UiPalette.dark().BG)
 
-	# Wait out the deferred concept push so it cannot resume after the free.
-	await get_tree().create_timer(2.1).timeout
 
 # ── Same-name profile replacement ─────────────────────────────────────
 
@@ -1350,7 +1300,6 @@ func test_renaming_to_an_existing_user_profile_asks_to_replace():
 	assert_eq(ProfileManager.profiles.size(), 1,
 		"confirming replaces the target, it does not keep both")
 	assert_eq(ProfileManager.profiles[0].get("name"), "Target")
-	await get_tree().create_timer(2.1).timeout
 
 func test_cancelling_a_replace_rename_keeps_both_profiles():
 	var ws := await _open_workspace_for_profiles()
@@ -1365,7 +1314,6 @@ func test_cancelling_a_replace_rename_keeps_both_profiles():
 	assert_eq(ProfileManager.profiles.size(), 2, "cancel keeps both profiles")
 	assert_eq(ProfileManager.profiles[0].get("name"), "Target")
 	assert_eq(ProfileManager.profiles[1].get("name"), "Source")
-	await get_tree().create_timer(2.1).timeout
 
 func test_saving_over_an_existing_profile_asks_before_replacing_tiles():
 	var ws := await _open_workspace_for_profiles()
@@ -1397,7 +1345,6 @@ func test_saving_over_an_existing_profile_asks_before_replacing_tiles():
 	assert_eq(ProfileManager.profiles.size(), 1, "the save replaces, not duplicates")
 	assert_gt((ProfileManager.profiles[0].get("tiles") as Array).size(), before,
 		"confirming writes the current workspace's tiles")
-	await get_tree().create_timer(2.1).timeout
 
 ## The backdrop is a global appearance setting too: a save reaches the terminal
 ## in every workspace, not only the visible one.
@@ -1425,4 +1372,3 @@ func test_a_settings_save_broadcasts_the_backdrop_to_every_terminal():
 	for body in bodies:
 		assert_eq(body.backdrop, SettingsManager.BACKDROP_GRADIENT,
 			"the terminal took the gradient backdrop")
-	await get_tree().create_timer(2.1).timeout

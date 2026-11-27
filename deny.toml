@@ -38,7 +38,45 @@ exceptions = [
 ]
 
 [bans]
-multiple-versions = "warn"
+multiple-versions = "deny"
+multiple-versions-include-dev = true
+
+# The recorded upstream pins. Each pair is attributed in the BUILD-102 detail;
+# remove an entry only when the named parent drops the old version.
+[[bans.skip]]
+name = "bitflags"
+version = "=1.3.2"
+# portable-pty 0.9.0 (latest) -> bitflags 1; remove when portable-pty uses 2.
+
+[[bans.skip]]
+name = "getrandom"
+version = "=0.2.17"
+# dirs 7.0.0 -> dirs-sys 0.5.0 -> redox_users 0.5.2 (Redox-only); remove when redox_users uses getrandom 0.4.
+
+[[bans.skip]]
+name = "shlex"
+version = "=1.3.0"
+# bindgen 0.72.1 (via ffmpeg-sys-the-third 6.0.0, build-only); remove when ffmpeg-sys pins bindgen 0.73+.
+
+[[bans.skip]]
+name = "syn"
+version = "=2.0.119"
+# bindgen / defmt-macros / jiff-static / thiserror-impl 1 (build and proc-macro); no single version exists.
+
+[[bans.skip]]
+name = "thiserror"
+version = "=1.0.69"
+# filedescriptor 0.8.3 -> portable-pty 0.9.0; remove when portable-pty updates filedescriptor.
+
+[[bans.skip]]
+name = "thiserror-impl"
+version = "=1.0.69"
+# the thiserror 1.0.69 sibling above; remove with it.
+
+[[bans.skip]]
+name = "windows-sys"
+version = "=0.59.0"
+# alacritty_terminal 0.26.0 (latest); remove when alacritty_terminal uses windows-sys 0.61.
 
 [sources]
 unknown-registry = "deny"

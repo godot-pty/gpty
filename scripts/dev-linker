@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Print or install an optional fast linker for the dev inner loop.
+#
+# Usage: scripts/dev-linker [--check | --write]
+#
+#   (no option)  print the export line for the detected linker
+#   --check      exit 0 when a linker is found, 1 otherwise
+#   --write      write the gitignored .cargo/config.toml for the detected linker
+#
+# Linux prefers mold then ld.lld; macOS uses lld; Git Bash on Windows uses
+# lld-link. The flag is opt-in: a clean build works without this script.
+#
+# Environment:
+#   DEV_LINKER_BIN_DIR  search this directory instead of PATH (tests)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+usage() {
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+die_usage() {
+    usage >&2
+    exit 2
+}
+
+MODE=print
+for arg in "$@"; do
+    case "$arg" in
+        --check) MODE=check ;;
+        --write) MODE=write ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "dev-linker: unknown option '$arg'" >&2
+            die_usage
+            ;;
+    esac
+done
+
+case "$(uname -s)" in
+    Linux*)
+        candidates=(mold ld.lld)
+        flags=(mold lld)
+        ;;
+    Darwin*)
+        candidates=(ld.lld lld)
+        flags=(lld lld)
+        ;;
+    MINGW* | MSYS* | CYGWIN*)
+        candidates=(lld-link)
+        flags=(lld)
+        ;;
+    *)
+        echo "dev-linker: unsupported host $(uname -s)" >&2
+        exit 1
+        ;;
+esac
+
+# An explicitly empty DEV_LINKER_BIN_DIR is a valid "find nothing" fixture.
+search="${DEV_LINKER_BIN_DIR-$PATH}"
+found=""
+found_flag=""
+for i in "${!candidates[@]}"; do
+    if PATH="$search" command -v "${candidates[$i]}" >/dev/null 2>&1; then
+        found="${candidates[$i]}"
+        found_flag="${flags[$i]}"
+        break
+    fi
+done
+
+if [[ -z "$found" ]]; then
+    echo "dev-linker: no mold or ld.lld/lld-link found; install mold (Linux) or lld (macOS/Windows)" >&2
+    exit 1
+fi
+
+case "$MODE" in
+    check)
+        echo "dev-linker: using $found (-fuse-ld=$found_flag)"
+        ;;
+    print)
+        printf 'export RUSTFLAGS="-C link-arg=-fuse-ld=%s"\n' "$found_flag"
+        echo "dev-linker: using $found" >&2
+        ;;
+    write)
+        mkdir -p .cargo
+        tmp="$(mktemp .cargo/config.toml.XXXXXX)"
+        printf '[build]\nrustflags = ["-C", "link-arg=-fuse-ld=%s"]\n' "$found_flag" >"$tmp"
+        mv "$tmp" .cargo/config.toml
+        echo "dev-linker: wrote .cargo/config.toml (using $found)"
+        ;;
+esac

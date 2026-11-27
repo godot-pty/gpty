@@ -3,8 +3,8 @@ extends GutTest
 # app asks the panes first (`PaneBody.request_close`), a refusal cancels the
 # whole action, and the quit itself goes through the workspace's seam.
 #
-# One workspace for the whole script, like `test_ipc_dispatch_contract.gd`
-# (each instance schedules a deferred concept push 2 s after `_ready`).
+# One workspace for the whole script, like `test_ipc_dispatch_contract.gd`;
+# its deferred settle timer is a child and is freed with it.
 
 const WorkspaceScript = preload("res://scenes/terminal/workspace.gd")
 
@@ -51,8 +51,6 @@ func before_each():
 
 
 func after_all():
-	# Let the workspace's deferred concept push land while it is still alive.
-	await get_tree().create_timer(2.1).timeout
 	remove_child(_ws)
 	_ws.free()
 	_ws = null

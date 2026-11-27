@@ -114,6 +114,13 @@ jobs:
       - name: Build CLI (release)
         run: cargo build --locked -p gpty --release
 
+      - name: Release artifacts are stripped
+        run: |
+          for f in target/release/libgpty_gdext.so target/release/gpty; do
+            file -b "$f" | grep -q ', stripped' \
+              || { echo "$f is not stripped" >&2; exit 1; }
+          done
+
       - name: Package
         run: |
           mkdir -p release/ffmpeg/lib release/ffmpeg/licenses
@@ -423,7 +430,7 @@ jobs:
           ls -la godot/bin/
 
       - name: Import project
-        run: godot --headless --path godot --import
+        run: ./scripts/export-check import -- godot --headless --path godot --import
 
       - name: Export Linux
         run: |
@@ -431,7 +438,7 @@ jobs:
           mkdir -p "$B"
           # The CLI owns the name `gpty`; the export ships beside it as `gpty-gui`
           # so `gpty <command>` can auto-spawn it (see the CLI's GUI discovery).
-          godot --headless --path godot --export-release "Linux/X11" "$B/gpty-gui"
+          ./scripts/export-check "Linux export" -- godot --headless --path godot --export-release "Linux/X11" "$B/gpty-gui"
           cp gdext-artifacts/gpty-linux-x86_64/gpty "$B/"
           # actions/download-artifact does not preserve file modes, so the CLI
           # arrives 0644 (`Permission denied` when run). The GUI is exported in
@@ -445,7 +452,7 @@ jobs:
         run: |
           B="$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64"
           mkdir -p "$B"
-          godot --headless --path godot --export-release "Windows Desktop" "$B/gpty-gui.exe"
+          ./scripts/export-check "Windows export" -- godot --headless --path godot --export-release "Windows Desktop" "$B/gpty-gui.exe"
           cp godot/bin/gpty_gdext.windows.x86_64.dll "$B/"
           cp gdext-artifacts/gpty-windows-x86_64/gpty.exe "$B/"
           cp LICENSE LICENSE-EXCEPTIONS.md "$B/"
@@ -454,7 +461,7 @@ jobs:
 
       - name: Export macOS
         run: |
-          godot --headless --path godot --export-release "macOS" "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip"
+          ./scripts/export-check "macOS export" -- godot --headless --path godot --export-release "macOS" "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip"
           # zip would happily create the archive itself, which would ship a
           # licenses-only download if the export above produced nothing.
           test -s "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" || { echo "macOS export produced no archive"; exit 1; }

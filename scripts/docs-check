@@ -20,11 +20,14 @@ Standard library only; run from anywhere. Exits 1 and lists every problem found.
     does not exist
   * README.md carries no hard-coded release version in the download file names
 """
+import argparse
 import datetime
 import os
 import re
 import subprocess
 import sys
+
+argparse.ArgumentParser(description=__doc__).parse_args()
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # What ships is what this gate judges. `TEMP*` is the scratch convention

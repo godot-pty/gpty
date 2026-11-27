@@ -28,12 +28,9 @@ func before_each():
 	})
 
 func after_each():
-	# Free synchronously while mocks are still active, and only after the
-	# workspace's deferred concept push (2 s after `_ready`) has landed - a
-	# resume on a freed instance is an engine error, which GUT counts as a
-	# failure.
+	# Free synchronously while mocks are still active; the workspace's deferred
+	# settle timer is a child and is freed with it.
 	if _ws:
-		await get_tree().create_timer(2.1).timeout
 		if _ws.get_parent():
 			_ws.get_parent().remove_child(_ws)
 		_ws.free()
