@@ -129,4 +129,3 @@ func test_a_collision_rename_copies_the_env_to_the_new_id():
 	assert_eq(PaneEnvStore.env_for("shared-term"), "OWNED=1",
 		"the first instance's entry is not taken away")
 
-	await get_tree().create_timer(2.1).timeout

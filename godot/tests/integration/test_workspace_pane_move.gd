@@ -6,11 +6,11 @@ extends GutTest
 # kill anything. The extension's own `Drop` is the only teardown, so the
 # session id and the child's liveness are the proof.
 #
-# One workspace for the whole script, like `test_ipc_dispatch_contract.gd`:
-# each instance schedules a deferred concept push 2 s after `_ready`. Every
-# test builds its own target workspace and closes it, which is also the
-# cleanup - `_close_workspace_now` resets that manager and frees its grid, so
-# the moved panes die with the workspace they were moved into.
+# One workspace for the whole script; its deferred settle timer is a child and
+# is freed with it. Every test builds its own target workspace and closes it,
+# which is also the cleanup - `_close_workspace_now` resets that manager and
+# frees its grid, so the moved panes die with the workspace they were moved
+# into.
 
 const WorkspaceScript = preload("res://scenes/terminal/workspace.gd")
 
@@ -30,8 +30,6 @@ func before_all():
 	await get_tree().process_frame
 
 func after_all():
-	# Let the workspace's deferred concept push land while it is still alive.
-	await get_tree().create_timer(2.1).timeout
 	remove_child(_ws)
 	_ws.free()
 	_ws = null

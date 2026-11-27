@@ -3781,13 +3781,28 @@ func _build_sidebar():
 # ═══════════════════════════════════════════════════════════════════════
 
 
+## Wait for the scene tree / CLI to settle without leaving a coroutine that
+## resumes on a freed workspace. A scene-tree timer cannot be cancelled; a
+## child `Timer` is freed with the workspace, so the await never resumes after
+## teardown. The 2 s delay is unchanged; only its ownership is.
+func _await_settle(seconds: float = 2.0) -> void:
+	var timer := Timer.new()
+	timer.one_shot = true
+	timer.wait_time = seconds
+	timer.autostart = true
+	add_child(timer)
+	await timer.timeout
+	if is_instance_valid(timer):
+		timer.queue_free()
+
+
 ## Push the merged concept set once the scene tree has settled (GDExtension
 ## and terminal nodes ready). The push itself lives in `ConceptManager`: the
 ## store is process-wide, so the scan this used to do only existed to borrow a
 ## terminal's instance as the FFI vehicle — and it silently skipped the push
 ## when no terminal was open.
 func _push_concepts_deferred():
-	await get_tree().create_timer(2.0).timeout
+	await _await_settle()
 	# The workspace may have been torn down (tests, quick quit) while waiting;
 	# resuming on a freed instance would raise a script error.
 	if not is_instance_valid(self) or not is_inside_tree():
@@ -3799,7 +3814,7 @@ func _push_concepts_deferred():
 ## record. Called from the install review's accept path; refreshing
 ## immediately would read the store before the install exists.
 func _refresh_plugin_content_deferred():
-	await get_tree().create_timer(2.0).timeout
+	await _await_settle()
 	# The workspace may have been torn down (tests, quick quit) while waiting;
 	# resuming on a freed instance would raise a script error.
 	if not is_instance_valid(self) or not is_inside_tree():
@@ -3858,7 +3873,7 @@ func get_terminal_for_ffi() -> GptyTerminal:
 
 func _prune_history_deferred():
 	# Wait for the scene tree to fully settle (GDExtension + terminal nodes ready)
-	await get_tree().create_timer(2.0).timeout
+	await _await_settle()
 	# The workspace may have been torn down (tests, quick quit) while waiting;
 	# resuming on a freed instance would raise a script error.
 	if not is_instance_valid(self) or not is_inside_tree():

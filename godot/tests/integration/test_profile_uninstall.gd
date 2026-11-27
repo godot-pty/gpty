@@ -67,7 +67,6 @@ func test_uninstalling_clears_accents_and_removes_the_rows():
 	assert_null(ws._sidebar._profile_list.get_child(0).get_node_or_null("ProfileUninstallBtn"),
 		"the sidebar row is rebuilt without the plugin trash")
 	ConceptManager.plugin_concepts_source = Callable()
-	await get_tree().create_timer(2.1).timeout
 
 func test_a_refused_uninstall_leaves_the_profile_in_place():
 	var ws := await _make_workspace()
@@ -84,4 +83,3 @@ func test_a_refused_uninstall_leaves_the_profile_in_place():
 		"and must not clear the workspace's accent")
 	assert_eq(ws._active_profile, "OMP")
 	assert_not_null(ws._sidebar._profile_list.get_child(0).get_node_or_null("ProfileUninstallBtn"))
-	await get_tree().create_timer(2.1).timeout

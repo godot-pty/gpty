@@ -113,7 +113,6 @@ func test_events_reach_only_the_source_terminal_s_workspace():
 	assert_eq(str(probe_b.events[0]["source_id"]), str(term_b.attachment_id))
 	assert_eq(str(probe_b.events[0]["envelope"]["event"]["name"]), "session.bound")
 
-	await get_tree().create_timer(2.1).timeout
 
 ## The reported 2026-10-28 case: activate the same profile in a second
 ## workspace. Its terminal is renamed (ids stay globally unique for IPC), and
@@ -170,7 +169,6 @@ func test_a_profile_activated_twice_keeps_its_companion_on_its_own_terminal():
 		"the local terminal's events reach the local companion")
 	assert_eq(reason_a._omp_session_id, "", "a foreign workspace's stream never does")
 
-	await get_tree().create_timer(2.1).timeout
 
 ## The Pane Settings apply contract, without the widget hunt: gather a dict,
 ## apply it to the target, then announce it with the id the pane had before the
@@ -247,4 +245,3 @@ func test_a_rename_never_reaches_another_workspace_s_companion():
 	assert_eq(str(reason_b.source_attachment_id), "agent-terminal",
 		"W2's companion keeps its own logical id")
 
-	await get_tree().create_timer(2.1).timeout

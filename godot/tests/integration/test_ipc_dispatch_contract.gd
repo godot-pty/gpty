@@ -46,8 +46,6 @@ func before_all():
 	await get_tree().process_frame
 
 func after_all():
-	# Let the workspace's deferred concept push land while it is still alive.
-	await get_tree().create_timer(2.1).timeout
 	remove_child(_ws)
 	_ws.free()
 	_ws = null
@@ -855,7 +853,9 @@ func test_accepted_plugin_profiles_are_read_after_the_clone_lands():
 	assert_true(ProfileManager.find_profile("contract-installed").is_empty(),
 		"the refresh must wait for the install to land, not read immediately")
 
-	await get_tree().create_timer(2.1).timeout
+	assert_true(await TestWaits.until(
+		func(): return not ProfileManager.find_profile("contract-installed").is_empty(), 5.0),
+		"the deferred refresh must pick up the installed plugin's profiles")
 	var found := ProfileManager.find_profile("contract-installed")
 	assert_false(found.is_empty(),
 		"the deferred refresh must pick up the installed plugin's profiles")
@@ -882,8 +882,8 @@ func test_accepted_plugin_concepts_are_read_after_the_clone_lands():
 	assert_eq(ConceptManager.plugin_sources().size(), 0,
 		"the refresh must wait for the install to land, not read immediately")
 
-	await get_tree().create_timer(2.1).timeout
-	assert_true(ConceptManager.plugin_sources().has("contract-concept"),
+	assert_true(await TestWaits.until(
+		func(): return ConceptManager.plugin_sources().has("contract-concept"), 5.0),
 		"the deferred refresh must pick up the installed plugin's concepts")
 	assert_eq(ConceptManager.plugin_sources()["contract-concept"].get("plugin_id"),
 		"godot-pty/gpty-nvim", "the rule keeps its provenance")
