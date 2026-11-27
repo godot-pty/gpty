@@ -220,6 +220,7 @@ mkdir -p "$XDG_RUNTIME_DIR" "$XDG_DATA_HOME" "$XDG_STATE_HOME" \
 case "$(uname -s)" in
     MINGW* | MSYS* | CYGWIN*)
         IS_WINDOWS=1
+        IS_DARWIN=0
         export GPTY_SOCKET='\\.\pipe\gpty-gut-'"$$"
         # Native processes cannot use the MSYS `/tmp/...` spelling, so the
         # sandbox is handed over as a Windows path.
@@ -230,6 +231,7 @@ case "$(uname -s)" in
         ;;
     *)
         IS_WINDOWS=0
+        if [[ "$(uname -s)" == Darwin ]]; then IS_DARWIN=1; else IS_DARWIN=0; fi
         export GPTY_SOCKET="$XDG_RUNTIME_DIR/gpty.sock"
         export GPTY_TEST_USER_DIR="$SANDBOX/user"
         ;;
@@ -457,11 +459,11 @@ if [[ -z "$SCRIPTS_RAN" || -z "$TESTS_RAN" ]] \
     UNTRUSTED+=("no Run Summary in the output — the run stopped before it finished")
 fi
 
-# Pending tests are allowed on Windows only, and printed: a fixture that needs a
-# POSIX shell or a file mode has no Windows meaning, and hiding those is worse
-# than showing them. Everywhere else a pending test is a skip nobody decided
-# on — a missing extension, an absent fixture — and a suite that skips quietly
-# reports green for code it never ran, so it fails the run instead.
+# Pending tests are allowed on Windows and macOS, and printed: a fixture that
+# needs a POSIX shell or a file mode has no Windows meaning, and macOS has no
+# /proc. On Linux a pending test is a skip nobody decided on — a missing
+# extension, an absent fixture — and a suite that skips quietly reports green
+# for code it never ran, so it fails the run instead.
 # A *risky* test — one that ran without asserting — is a real smell, so it fails.
 RISKY="$(grep -c '\[Risky\]' "$PLAIN" || true)"
 PENDING="$(grep -c '\[Pending\]' "$PLAIN" || true)"
@@ -469,8 +471,8 @@ PENDING_TOTAL="0"
 if [[ "$RISKY" != "0" ]]; then
     FAILURES+=("a test ran without asserting ([Risky])")
 fi
-if [[ "$PENDING" != "0" && "$IS_WINDOWS" != "1" ]]; then
-    FAILURES+=("pending tests are a Windows-only allowance, but these skipped on $(uname -s):")
+if [[ "$PENDING" != "0" && "$IS_WINDOWS" != "1" && "$IS_DARWIN" != "1" ]]; then
+    FAILURES+=("pending tests are a Windows/macOS allowance, but these skipped on $(uname -s):")
     while IFS= read -r line; do
         FAILURES+=("    $line")
     done < <(grep -E '^ *\[Pending\]' "$PLAIN" | sort -u)
