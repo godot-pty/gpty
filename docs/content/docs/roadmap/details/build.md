@@ -1630,6 +1630,14 @@ x86_64: 4-6 min. Left uncached on purpose: `export`'s Godot editor and template 
 s of its 1:46), because they would need their own writer on `main` and buy well under a minute once
 the wall is ~8 - revisit with the nightly path.
 
+Shipped in `752b78a` and recorded from the first tag after it, v0.8.6 release run
+`45276452554`: the build half ran 2026-11-23T22:06:52Z -> 22:35:50Z, **28m58s** wall
+against 38m before the split. `build-linux` 58s, `build-macos` arm64 12m32s and x86_64
+13m19s, `build-windows` 25m47s, `export` 1m29s. Windows still spent 20m39s in
+`Build media dependencies` because the restored prefix supplies DLLs but not vcpkg's
+headers; that residual is BUILD-99. The `publish-crates` re-run the next day is not
+part of the wall.
+
 ## BUILD-78
 
 **A patch release on an archived `X.Y.x` branch cannot pass the release gate** - found 2026-11-17
@@ -1672,6 +1680,14 @@ and merged with no ruleset change, and the next one is one `pr push` call. Tests
 fixture for the split and the `W == HEAD` refusal; `--dry-run` prints the two shas and makes no
 network call.
 
+Shipped in `scripts/pr push`: it computes the newest commit in the base..HEAD range
+that touches `.github/workflows`, pushes that commit with the maintainer's `gh` token
+through `GIT_ASKPASS`, then pushes HEAD as the bot, and refuses when the newest commit
+is the workflow one (a non-workflow commit must follow). PR #62 was pushed that way:
+maintainer `3af51f8`, bot `676ffd2`, and the approval after the bot's push was
+accepted. The temp-repo `selftest` covers the split and the refusal without a network;
+`push --dry-run` prints the two shas.
+
 ## BUILD-80
 
 **Shipping a session is four manual steps with one trap** - the 2026-11-24 session committed two
@@ -1695,6 +1711,14 @@ skills, and `scripts/ci-check`'s two tooling lists) and leave closed roadmap his
 a PR with `pr push`/`pr open`/`pr land` and no hand-built `gh` sequence; the four scripts are gone;
 the pre-commit guard refuses on `main` and allows a feature branch; `pr land --dry-run` refuses a
 non-bot author and an unapproved PR without network.
+
+Shipped as one `scripts/pr` with `push`, `open`, `wait`, `land`, `prune` and
+`selftest`; `land` refuses a non-bot author, posts the maintainer approval with
+`--approve`, enqueues with `gh pr merge --auto --merge`, waits through the merge queue,
+prunes and prints the merge SHA plus the post-merge Docs/Scorecard/Secret-scan
+conclusions. `bot-push`, `bot-pr`, `pr-wait` and `branch-prune` are deleted and every
+live reference points at the new command; `githooks/pre-commit` refuses `main`, and
+`pr selftest` runs in `scripts/tooling-smoke`.
 
 ## BUILD-81
 
@@ -1794,6 +1818,14 @@ required reviews and all 12 status checks, so a non-admin token can read them th
 `GET /repos/{owner}/{repo}/rules/branches/main`. The remaining acceptance is the LFX
 `securityPracticesScore` re-ingest to 8, which is asynchronous.
 
+Dropped 2026-11-27 as superseded: the LFX project API no longer carries a
+`securityPracticesScore` field (`GET /api/project/godot-pty-gpty` has no such key), so
+the acceptance cannot be measured. The configuration it was meant to measure is now
+publicly readable without an admin token:
+`GET /repos/godot-pty/gpty/rules/branches/main` returns the `pull_request` rule (one
+approval, last-push approval) and `required_status_checks` (`ci-gate`, `secret-scan`,
+the four `Analyze` contexts). The ruleset half landed in 0.8.4; no code change remains.
+
 ## BUILD-86
 
 **Four of the seven closed pull requests were closed unmerged, which caps the merge-ratio signal and cost the Scorecard vulnerability point** - measured
@@ -1874,6 +1906,13 @@ it needs bash and python3 only, both already present on the runner. Do not add a
 its runtime justifies one. Tests: a deliberate `bash -n` error in `scripts/measure-cost` fails the
 `docs` job; the green run's log lists the tooling checks.
 
+Shipped: `scripts/tooling-smoke` is the extracted `bash -n`/`py_compile`/backfill/
+secret-scan smoke plus `scripts/pr selftest`; `scripts/ci-check`'s
+`run_tooling_scripts` calls it, and the `docs` CI job now runs it directly. The docs
+job in PR #62 run `45921076617` (job `140251690374`) passed it; planting `if` in
+`scripts/measure-cost` made the same script exit 1 with `bash -n scripts/measure-cost`
+named.
+
 ## BUILD-92
 
 **The post-merge Scorecard workflow cannot pull its pinned action image** - measured 2026-11-24 on
@@ -1888,6 +1927,11 @@ the image with `docker manifest inspect` before the action runs, and record the 
 green run. Do not add a retry loop around the pull: a manifest that does not exist is deterministic.
 Tests: the post-merge `Scorecard` run completes; the image check fails fast with the tag named when
 it is missing.
+
+Resolved upstream: the pin is still `ossf/scorecard-action@23f22cd… # v2.6.0`, and the
+workflow now completes. The first green run after the 2026-11-24 failure is
+`45904273781` (2026-11-26T22:21:36Z); `45915037604` and `45917174196` followed in
+about 40s. No retry loop was added: the manifest exists, so the pull is deterministic.
 
 ## BUILD-93
 
@@ -1910,6 +1954,21 @@ time from a run before and after. Tests: a lockfile-only PR restores dependency 
 no PR-scoped cache; the total after a week is below the recorded ceiling; `cargo test --workspace`
 passes from the restored cache.
 
+Shipped: the five raw `target/` caches are `Swatinem/rust-cache@v2.9.3` restore-only;
+a new `Cache Warm` workflow is the writer on `main` (a PR/merge-scoped cache is
+unreadable by the next PR) and saves one key per platform. Run `45923611984` warmed
+Linux (3m09s), Windows (4m02s), macOS (3m56s) and the fuzz workspace (6m20s), writing
+`v0-rust-linux-debug` 345 MB, `v0-rust-windows-debug` 340 MB, `v0-rust-macos-check`
+187 MB and `v0-rust-fuzz` 351 MB. The cleanup removed every PR/merge entry and the old
+`Linux-cargo` 1222 MB, `Windows-cargo` 431 MB and `Linux-fuzz` 1010 MB keys, taking the
+repository from 32 entries / 9.25 GiB to **10 entries / 1.39 GiB**; the four rust keys
+are main-scoped, and the old FFmpeg keys the changed `media-deps` hash retired were
+deleted too. A second dispatch `45924435909` restored the exact keys
+(`Restored from cache key "v0-rust-linux-debug-…" full match: true`): Linux 49s,
+Windows 1m58s, macOS 39s, fuzz 1m07s, with `cargo test --workspace` passing on Linux.
+A PR run restores these keys and saves nothing (`save-if: false` in
+`ci.yml`).
+
 ## BUILD-94
 
 **The changed-path classifier is one `code` bit, so a GDScript edit pays for Rust, Windows and macOS** - the
@@ -1930,6 +1989,15 @@ gate before `main`; `ci-gate` already treats a skipped job as success. Tests: re
 for a docs-only PR, a `godot/**`-only PR, an `extensions/gpty-omp-events/**`-only PR and the first
 merge-group run; the first three must skip the jobs above, the merge-group run must run all of them,
 and `ci-gate` must pass in each.
+
+Shipped: `scripts/classify-changes` prints `rust`, `godot`, `node` and `macos` from the
+one `scripts/ci-classes.env`; PR #62 run `45921076617`'s `changes` job (28 files)
+printed all four true, and the merge-group run `45922481491` ran the full matrix
+(`rust-tests`, `gut-tests`, `windows`, `macos`, `static`, `fuzz-build`, the audits) with
+`commit-lint` skipped for the queue. The godot-only and node-only job lists are the
+fixtures in `scripts/tooling-smoke` plus the one-expression `if:` per job; no extra
+closed PRs were opened for them, because that spends the merge-ratio signal BUILD-86
+owns.
 
 ## BUILD-95
 
@@ -2013,6 +2081,15 @@ test the vcpkg tree before printing "already built". The release path no longer 
 **A tag release still builds every platform cold** now restores the built
 `dist/ffmpeg/windows-x86_64` prefix and consults vcpkg only when that misses, so the remaining cost
 is the CI windows jobs' own.
+
+Shipped: the Windows release job restores the vcpkg tree on every build and saves it
+from main; `media-deps` checks the tree before printing "already built" and names the
+install when it is missing. The v0.8.6 tag (run `45276452554`) reproduced the defect:
+the prefix hit skipped the vcpkg restore, the step printed "already built" and then
+spent 20m39s in `vcpkg install ffmpeg`. The post-merge dispatch on `20c74154` (run
+`45924244247`, Windows job `140261792749`) restored the tree in 16s and `Build media
+dependencies` completed in the same second; the save step skipped on the cache hit.
+Linux and macOS are unchanged.
 
 ## BUILD-100
 
@@ -2127,6 +2204,13 @@ bindings build C for the host; if a subset (`gpty-ipc`, `gpty-ai`) checks cleanl
 PR-time signal, but do not block this row on it. Measure the macOS job minutes from
 `gh run view --json jobs` before and after and record them. Tests: a shared-Rust PR's run skips
 `macos`; a `crates/gpty-ipc/src/server.rs` PR runs it; a merge-group run always runs it.
+
+Shipped: `macos` reads `needs.changes.outputs.macos`; the bit is set by
+`crates/gpty-ipc/**`, `crates/gpty-gdext/build.rs`, `crates/gpty-media/**`, `Cargo.toml`,
+`Cargo.lock`, `rust-toolchain.toml`, `scripts/install-rust`, `scripts/media-deps` and
+`dist/ffmpeg/**`, and by any unclassified path. PR #62 run `45921076617`'s `macos` job
+passed in 3m23s; the merge queue always runs it. The fixture `crates/gpty-ipc/src/server.rs`
+sets both `rust` and `macos`.
 
 ## BUILD-107
 
@@ -2433,6 +2517,13 @@ session-wrap-up skills. The two executable lists differ only in redundant entrie
 `scripts/check-ci-classes` canonicalises the two lists (path or glob, sorted) and fails on drift;
 run it from `ci-check` and the Docs workflow.
 
+Shipped: `scripts/ci-classes.env` is the one source for `DOCS_PATTERNS`,
+`TOOLING_PATTERNS` and the classifier's path lists; `scripts/ci-check` sources it and
+`scripts/classify-changes` reads it, while `testing.md` and the commit/session skills
+point at it instead of copying the list. The drift the row described is structurally
+impossible, so no `check-ci-classes` script was added; the classifier fixtures in
+`scripts/tooling-smoke` exercise the patterns.
+
 ## BUILD-128
 
 **Four tools parse the roadmap index row** - `docs-check`, `scripts/check-capabilities`,
@@ -2488,6 +2579,12 @@ conventional `~/.config/gpty/gpty-bot.pem`, so `--key` was needed on every bot c
 `scripts/maintainer-push` (one command, token via askpass) and a `bot-token` default to the
 conventional key path; document the two-push order.
 
+Shipped: `scripts/bot-token` defaults to `~/.config/gpty/gpty-bot.pem` (the key it
+already documented), `scripts/git-askpass-token` carries either the maintainer's
+`GPTY_GIT_TOKEN_FILE` or the bot's `GPTY_BOT_TOKEN_FILE`, and `scripts/pr push` is the
+one command that performs the two-push order. `scripts/bot-token --check` passes with
+no environment variable set.
+
 ## BUILD-134
 
 **The pre-push hook treats tags and deletes as full-suite pushes** - the new-branch fallback
@@ -2504,6 +2601,13 @@ versions, the MCP descriptor and the cost stamp on every PR; a docs/workflow-onl
 any of them. They are seconds, but they are code checks on an unchanged tree and blur the docs-only
 promise. Fix: move them behind `needs.changes.outputs.code == 'true'` (a `static` job) or into the
 code jobs; keep the docs job to docs-check, the catalogue and the bundles.
+
+Shipped: the source checks (release versions, the MCP descriptor, FFI surface, log
+hygiene, theme tokens, test guards, the cost stamp/chart) moved to a `static` job gated
+`rust || godot`; `docs` keeps docs-check, the catalogue and both bundles, plus
+`scripts/tooling-smoke`. PR #62 run `45921076617`'s `static` job passed in 14s, and the
+docs-only close-out PR runs only `changes`, `lint-workflows`, `docs`, `commit-lint` and
+`ci-gate`.
 
 ## BUILD-136
 
