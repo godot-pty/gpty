@@ -434,14 +434,18 @@ Commits: 25adc85
 
 ## DOCS-28
 
-**The session workflow's own output is not budgeted** - the 2026-11-25 session printed the full
-`commit` selection five times (`draft` plus four `only`/`take`/`drop` calls, ~1.5 KB each), and the
-approved plan repeated full code sketches. Fix: `skill://commit` step 5 prescribes `silent=True` on
-`draft`/`only`/`take`/`drop` and one compact `d.commit` record, with `d.show(path)` only for a file
-that must be split; `docs/content/docs/agents/roadmap-workflow.md` and `skill://gpty-roadmap-task`
-state the plan-handoff convention (signatures, edge cases, exact commands and acceptance, not
-bodies); `scripts/pr` (row B) prints one compact line per step and JSON summaries, not full
-`gh pr checks` tables. Test: `python3 scripts/docs-check` and a read of the skill/page diff.
+**The session workflow's own output is not budgeted** - `skill://commit` step 5 now prescribes
+`silent=True` on `draft`/`only`/`take`/`drop`, one compact `d.commit` record per commit, and
+`d.show(path)` only for a file that must be split; the new `Bulk migrations` section carries the
+same rule with explicit selection and delta verification. The roadmap guide's `Handoff` section and
+the roadmap skill state the plan convention - signatures, edge cases, exact commands and acceptance,
+never code bodies - and the queue rules prefer `show <ID>`/`--json` over a whole page. The
+`scripts/pr` half was already true, so no edit: `wait_pr` prints only a changed state/queue line,
+the merge-group and post-merge runs print one line each, every `gh` read selects JSON fields, and
+`git grep -n 'gh pr checks' -- scripts/` returns nothing. Verified with `python3
+scripts/docs-check`.
+
+Commits: 3153852, 18e42af, 04e689f
 
 ## DOCS-29
 
@@ -680,25 +684,35 @@ generator), 60-second quick start.
 
 ## DOCS-53
 
-**The screenshot page is a flat wall with title-only captions** - `screenshots/v0.8.md` is 39 KB and
-325 lines with one `## Screenshots` heading, bold `v0.8.6`/`v0.8.7` paragraphs (no TOC) and captions
-that name rows only by title, so a row rename strands the caption; the chain page's one-line capture
-link sits at the bottom. Fix: promote the capture groups to `##` headings, cite `ID · title` in
-captions, and move the chain-page link near the top.
+**The screenshot page is a flat wall with title-only captions** - `screenshots/v0.8.md` now has five
+`##` capture groups (v0.8.6 close-out set, v0.8.7 motion captures, depth and backdrop, finish pass,
+November 2026 re-baseline) under the `## Screenshots` anchor every detail link uses. All 73 captions
+cite their rows as `ID · title` (87 references), including the former "the same row" caption, so a
+retitle no longer strands a caption; the one line over 768 bytes after the IDs is wrapped at a
+sentence boundary and the page's longest line is now 725 bytes. The v0.8 chain page's capture link
+moved from the bottom to the top. Verified with `python3 scripts/docs-check` and a Hugo render of
+the page: the TOC lists all six headings and the first caption reads `GUI-107 · The empty workspace
+teaches every shortcut, with a living keycap`.
+
+Commits: 5fbf5b5, 04e689f
+
 ## DOCS-54
 
-**The commit and agent guides miss the bulk-commit and context-cost practices** - the 2026-11-26 1
-MB reflow produced ~50 KB and 1,400 lines of commit-helper Review/Selected, the amend summary listed
-the whole commit rather than the delta, and the guides do not say to use `silent`, `drop("**")` plus
-`take`, verify with `git diff <old>..HEAD`, or redirect and tail the long gates. Fix: add a short
-bulk-migration section to `skill://commit` (silent, explicit selection, delta verification) and the
-context-cost practices (summary gates, `show` over whole detail pages, `--json` selectors) to
-`testing.md` or the roadmap guide.
+**The commit and agent guides miss the bulk-commit and context-cost practices** - `skill://commit`
+has a `Bulk migrations` section: draft silently, `drop("**")` then `take` the group, or `only(...)`,
+and verify the commit's delta with `git diff <base>..HEAD --stat` / `git diff ORIG_HEAD..HEAD` after
+an amend; step 5 spells out the silent calls. `testing.md`'s summary-gate bullet now covers a
+hand-run gate (redirect it and read the tail), and the roadmap guide's queue rules read `show
+<ID>`/`--json` instead of a whole page. Verified with `python3 scripts/docs-check`.
+
+Commits: 5fbf5b5, 04e689f
+
 ## DOCS-55
 
-**Gate-runner changes land inside content PRs and pay the full matrix** - PR #54 changed
-`scripts/ci-check`, `githooks/pre-push` and `.github/workflows/ci.yml`, so the ledger, screenshot
-and docs content ran the full matrix and the PR took 25.8 minutes; the docs-only push before it ran
-in 4.6 seconds. A gate PR pays the full matrix once; a content PR stays docs-class. Fix: one
-sentence in `skill://commit` and the roadmap workflow: land gate-runner and workflow changes
-separately from content, and name the class in the PR.
+**Gate-runner changes land inside content PRs and pay the full matrix** - `skill://commit` and the
+roadmap guide now say gate-runner/workflow edits land as their own branch and PR, with the class
+named in the PR body, so a content PR stays docs-class. This PR is the content half (`Class: docs`);
+the `scripts/check-ffi-surface` work is kept for a separate gate PR. Verified with `python3
+scripts/docs-check` and this PR's own class line.
+
+Commits: 5fbf5b5, 04e689f
