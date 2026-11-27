@@ -2803,3 +2803,16 @@ the macOS app export to a non-headless macOS job (e.g. extend `bundle-macos`), r
 shader cache lands in the `.app`, re-sign after baking, and measure the graph's first-open time and
 bundle size on a real Mac. Tests: a release-build dispatch carries the cache and the app opens the
 graph without the compile hitch; record the numbers in the v0.9.0 budget table.
+
+## BUILD-139
+
+**A second `scripts/pr push` fails when its workflow commit is already on the remote** - found
+2026-11-27 on PR #71: after the first split push put `f830b0d` on `build/v094-hygiene`, a later push
+of `88b2104` computed the newest workflow-touching commit in `origin/main..HEAD` (`f830b0d`) and
+tried to push it again with the maintainer credential; git rejected it as non-fast-forward, so the
+bot push never ran. Fix: in `cmd_push`, read the remote head and skip the maintainer push when
+`git merge-base --is-ancestor "$w" "$remote"`; otherwise push it as today. Add a `scripts/pr
+selftest` fixture for the already-remote case (the split plan is already pure; the remote decision
+is the new seam). Tests: a fixture remote containing `w` goes straight to the bot push; a remote
+behind `w` still performs the maintainer push; a branch whose newest commit touches
+`.github/workflows` still refuses.
