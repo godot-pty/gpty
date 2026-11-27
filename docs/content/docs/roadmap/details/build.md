@@ -2248,12 +2248,14 @@ gate, and name that set in the step so it stays a list rather than a threshold.
 
 **Implemented 2026-11-27.** `scripts/export-check` runs a command through `tee`, passes its exit
 status, and fails on any `SCRIPT ERROR`/`Failed to load script` outside the four named import-pass
-classes. The import and all three export steps call it; `--check-log` fixtures cover the four
-allowed lines, an unknown parse error and a failed script load. A local
-`godot --headless --path godot --import` through the gate exits 0; the release dispatch is the
-end-to-end run.
+classes and the 15 dependent script names those classes make unloadable. The import and all three
+export steps call it; `--check-log` fixtures cover the known lines, an unknown parse error and an
+unknown failed script. The first release dispatch (run 46033110660) rejected the `Failed to load
+script` lines for `workspace.gd` and the 14 dependent autoloads; 290e470 added that closed list, and
+replaying the real import log through `--check-log` now exits 0. A local
+`godot --headless --path godot --import` also exits 0; the next dispatch is the end-to-end proof.
 
-Commits: 8c58684, 18e42af, b021fb4, f830b0d
+Commits: 8c58684, 18e42af, b021fb4, f830b0d, 290e470
 
 ## BUILD-105
 
@@ -2333,9 +2335,12 @@ archive (SHA512 added to `godot-version.json`) and puts the nested `Godot.app/Co
 executable on PATH. The `macos` job (75-minute cap) now installs Godot, builds the CLI/extension,
 imports, runs `ui-capture --check`, the pane-API smoke, `--dir unit` and the five platform-path
 tests. `scripts/classify-changes` prints `macos=false` for a GDScript path and `macos=true` for
-`Cargo.toml`; the PR's macOS run is the remaining proof.
+`Cargo.toml`. The first macOS run (46033100783) found the helpers were Bash 4-only: `ui-sandbox`
+used `[[ -v ]]`, `gut-check` used `declare -A` and `ui-capture-check` used `mapfile`, which macOS
+`/bin/bash` 3.2 rejects. 11c21b8 replaces them with an eval set test, an indexed file list and a
+read loop; the PR rerun is the remaining proof.
 
-Commits: 68f0558, 18e42af, f830b0d
+Commits: 68f0558, 18e42af, f830b0d, 11c21b8
 
 ## BUILD-108
 
