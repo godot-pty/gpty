@@ -2512,3 +2512,14 @@ code jobs; keep the docs job to docs-check, the catalogue and the bundles.
 listing its remaining rows. A reader must run `stats` or open pages to plan. Fix: generate and check
 the open counts in the release-chain list from `roadmap stats`; add `next --limit/--chain/--area`
 and `release-check --open`; keep the index itself one line per row.
+
+## BUILD-137
+
+**`scripts/roadmap show` prints the detail page path with the index row's line number** - measured
+2026-11-26 while closing the v0.9.3 rows: `show SEC-55` printed
+`docs/content/docs/roadmap/details/sec.md:94` above `| ✅ | [SEC-55]...`, where 94 is the index
+line on `v0.9.md` and the detail section starts at 1122. `cmd_show` takes `page, sec =
+ledger.section(row)` (the detail page) and prints `rel(page.path):{row.line}`, pairing one file's
+path with another file's line. Fix: print `rel(row.page.path):{row.line}` (the index row the
+second line quotes) and leave the detail page path out of the header. Test: extend the `selftest`
+fixture so `show TEST-1` asserts the `v0.0.md` header.
