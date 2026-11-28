@@ -2998,14 +2998,14 @@ Commits: aaf3d22
 
 ## BUILD-146
 
-**`docs-check` reads the caller's git index, so a hook's synthetic index fails an unchanged tree** - found
-2026-11-28 while committing PR #80: with `GIT_INDEX_FILE` set to the OMP commit helper's private
-index (exported to a pre-commit hook), `python3 scripts/docs-check` failed an unchanged tree with
-378 `path does not exist`/citation problems, and with an empty index it exits 2 (`cannot list
-tracked paths with git`). `REPO_FILES` comes from `git ls-files`, which honours the caller's
-`GIT_DIR`/`GIT_INDEX_FILE`; `scripts/check-secrets` and the test fixtures already strip `GIT_*` and
-`docs-check` does not, so a hunk-level commit through the documented `commit` namespace fails its
-own pre-commit gate. Fix: run the `ls-files` call with `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_WORK_TREE`,
-`GIT_COMMON_DIR` and `GIT_OBJECT_DIRECTORY` removed. Tests: the `scripts/tooling-smoke` docs
-evidence fixture must pass with an empty `GIT_INDEX_FILE`, with its guide naming a real path so the
-file list is exercised.
+**`docs-check` reads the caller's git index, so a hook's synthetic index fails an unchanged tree** - `docs-check`
+now strips every `GIT_*` variable for its `git ls-files` call, so it lists the tree's own index
+instead of a calling hook's synthetic one. Reproduced with an empty `GIT_INDEX_FILE` (exit 2,
+`cannot list tracked paths with git`) and with a 12-entry index (378 false missing-path/citation
+problems); after the change the same unchanged tree reports `docs-check: OK`.
+
+The docs evidence fixture names a real path in its guide (so the file list is exercised) and runs
+the pass tree with an empty `GIT_INDEX_FILE`, which must still pass. Found while committing PR #80,
+where a hunk-level commit's pre-commit hook blocked the docs gates with those false problems.
+
+Commits: 8b5059c
