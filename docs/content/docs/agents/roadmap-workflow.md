@@ -55,7 +55,7 @@ Ties break toward the smaller item.
 
 ## Handoff
 
-A plan handed to another agent is an execution spec: signatures, edge cases, exact commands and the acceptance check, never code bodies. The reader has the repository, and a pasted sketch is re-read on every later turn and stale the moment the code moves. Quote only a load-bearing literal - a message, a wire key, a search token - and name paths and symbols for the rest.
+A plan handed to another agent is an execution spec: signatures, paths, edge cases, exact commands and the acceptance check - never code or prose bodies. The reader has the repository, and a pasted body is re-read on every later turn and stale the moment the code moves. Quote only a load-bearing literal - a message, a wire key, a search token, a section that must be exact - and name paths and symbols for the rest.
 
 ## Screenshots
 
