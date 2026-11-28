@@ -6,11 +6,11 @@ set -euo pipefail
 #                         [--stamped | --stamp | --stamp-check | --stamp-print]
 #                         [--summary | --verbose]
 #   --fast        the pre-commit subset (media through tooling; no app matrix)
-#   --classify    print the changed set and its class; run nothing
+#   --classify    print the changed set, its class and the selected steps; run nothing
 #   --only ...    run only the named steps in canonical order; never stamps
 #   --list-steps  print the step ids and exit
-#   --stamped     skip when the clean-tree stamp matches; else run the full gate
-#   --stamp       run the full gate and write the stamp when the tree is clean
+#   --stamped     skip when the clean-tree stamp matches; else run the selected class
+#   --stamp       run the gate and write the stamp when the tree is clean
 #   --stamp-check report stamp validity without running the gate
 #   --stamp-print print the current stamp fingerprint (tests)
 #   --summary     capture each step's output to a log, print only its named
@@ -51,6 +51,10 @@ set -euo pipefail
 # the unpushed commits otherwise, always plus uncommitted and untracked files.
 # CI_CHECK_FULL=1 forces the full suite.
 #
+# The class decides the steps in every mode, including a `--stamped` run whose
+# stamp does not match: the stamp records the outcome, it never bypasses the
+# classification.
+#
 # A missing optional toolchain (node, godot, python3 >= 3.11, cargo-audit)
 # SKIPs with a warning on a dev machine, but FAILS the run when the CI or
 # GITHUB_ACTIONS environment variable is set: a CI build must not go green
@@ -69,11 +73,11 @@ Usage: scripts/ci-check [--fast | --classify | --only <id[,id]> | --list-steps]
                         [--stamped | --stamp | --stamp-check | --stamp-print]
 
   --fast        run the pre-commit subset (media through tooling)
-  --classify    print the changed set and its class; run nothing
+  --classify    print the changed set, its class and the selected steps; run nothing
   --only <ids>  run only these comma-separated steps, in canonical order
   --list-steps  print one step id per line and exit
-  --stamped     skip when the clean-tree stamp matches; else run the full gate
-  --stamp       run the full gate and write the stamp when the tree is clean
+  --stamped     skip when the clean-tree stamp matches; else run the selected class
+  --stamp       run the gate and write the stamp when the tree is clean
   --stamp-check report stamp validity without running
   --stamp-print print the current stamp fingerprint (tests)
   --summary     print each step's named result and log, not every gate's output
@@ -1012,6 +1016,9 @@ step_deny() {
 }
 
 # ── Selection ──────────────────────────────────────────────────────────
+# The stamp is an outcome, never an input: --stamped with no matching stamp
+# classifies the range the hook passes and then writes the stamp, so a
+# docs-only first push is not the full suite (BUILD-141).
 SELECTED=()
 if [[ -n "$ONLY" ]]; then
     IFS=',' read -r -a requested <<<"$ONLY"
@@ -1031,12 +1038,6 @@ if [[ -n "$ONLY" ]]; then
             fi
         done
     done
-elif $CLASSIFY; then
-    report_class
-    printf "\n"
-    exit 0
-elif $STAMP_AFTER; then
-    SELECTED=("${STEPS[@]}")
 elif [ -z "${CI_CHECK_FULL:-}" ] \
     && { [ -n "${CI_CHECK_RANGE_FROM:-}" ] || ! $CI_MODE; } \
     && docs_class_change; then
@@ -1054,6 +1055,13 @@ elif $FAST; then
     SELECTED=(media fmt workflows docs capabilities secrets theme guards ffi log lock clippy cost tooling)
 else
     SELECTED=("${STEPS[@]}")
+fi
+
+if $CLASSIFY; then
+    report_class
+    printf "\n  steps: %s\n" "${SELECTED[*]}"
+    printf "\n"
+    exit 0
 fi
 
 run_step() {
