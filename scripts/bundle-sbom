@@ -227,12 +227,22 @@ def build(stage: Path, version: str) -> dict:
             }
         )
 
+    # Two runs of the same version (a nightly's cron and a dispatch, say) are
+    # different documents, and SPDX wants a namespace per document: derive it
+    # from the file inventory so it is unique and still reproducible.
+    inventory = hashlib.sha256(
+        "".join(
+            f"{entry['fileName']}:{entry['checksums'][1]['checksumValue']}"
+            for entry in files
+        ).encode()
+    ).hexdigest()[:16]
+
     return {
         "spdxVersion": "SPDX-2.3",
         "dataLicense": "CC0-1.0",
         "SPDXID": DOCUMENT_ID,
         "name": f"gpty-{version}",
-        "documentNamespace": f"https://gpty.dev/spdx/gpty-{version}",
+        "documentNamespace": f"https://gpty.dev/spdx/gpty-{version}-{inventory}",
         "creationInfo": {
             "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "creators": ["Tool: gpty-bundle-sbom"],
@@ -283,6 +293,13 @@ def self_test() -> None:
         licenses = {entry["licenseInfoInFiles"][0] for entry in document["files"]}
         if "Bitstream-Vera" not in licenses:
             fail("self-test: the font's license did not reach the file entry")
+
+        # A second run over different bytes is a different document, so the
+        # namespace has to move with the inventory.
+        (work / "payload" / "gpty-v0.0.0-linux-x86_64" / "gpty").write_bytes(b"ELF2\n")
+        again = build(work, "v0.0.0")
+        if again["documentNamespace"] == document["documentNamespace"]:
+            fail("self-test: the namespace did not change with the content")
 
         # An unlabelled embedded path must be refused, not published.
         (work / "embedded" / "godot" / "mystery").mkdir()
