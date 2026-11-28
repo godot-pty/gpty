@@ -614,6 +614,16 @@ check_ci_changes_fixture() {
         printf 'a Rust-only diff selected godot:\n%s\n' "$out"
         return 1
     }
+    printf "\nDOCS_PATTERNS+=('scripts/ci-classes.env' 'crates/*')\n" \
+        >>"$repo/scripts/ci-classes.env"
+    printf '// fixture change\n' >>"$repo/crates/gpty-core/src/lib.rs"
+    fixture_commit "$repo" classifier
+    out="$(env BASE="$base" HEAD="$(git -C "$repo" rev-parse HEAD)" \
+        bash "$repo/scripts/ci-changes")" || return 1
+    if [ "$out" != "$(printf 'rust=true\ngodot=true\nnode=true\nmacos=true')" ]; then
+        printf 'a self-classifying edit did not force the matrix:\n%s\n' "$out"
+        return 1
+    fi
     out="$(env BASE=none HEAD="$(git -C "$repo" rev-parse HEAD)" \
         bash "$repo/scripts/ci-changes")" || return 1
     grep -qx 'rust=true' <<<"$out" || {

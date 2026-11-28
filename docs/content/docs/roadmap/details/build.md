@@ -3022,3 +3022,15 @@ index, and `docs-check` read the synthetic index. The fix stripped `GIT_*` in
 under `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY`,
 so every fixture and copied gate is covered mechanically; add a check that a fixture command with an
 empty `GIT_INDEX_FILE` still works, and drop the now-redundant helpers.
+
+## BUILD-148
+
+**A diff can classify its own edit to the classifier, so marking app paths docs skips the queue matrix** - BUILD-142
+removed the merge-group all-true branch, so the queue runs the class the diff's own
+`scripts/ci-classes.env` and `classify-changes` produce. A PR that adds an app path to
+`DOCS_PATTERNS` and changes that path is docs-only under its own patterns in both the pull-request
+and merge-group runs; before BUILD-142 the stock queue job forced the matrix because the PR did not
+edit `ci.yml`. Fix: `scripts/ci-changes` forces every bit true when the diff names
+`scripts/ci-classes.env`, `scripts/classify-changes` or `scripts/ci-changes`, so a classifier edit
+always pays the matrix. Tests: the `ci-changes` fixture commits an edit to `ci-classes.env` and
+asserts all four bits are true.
