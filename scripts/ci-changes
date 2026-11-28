@@ -8,12 +8,15 @@
 # missing base or a diff git cannot compute prints all true - a tree whose
 # class is unknown runs the full matrix rather than skipping it. A merge-queue
 # group passes its event's base_sha/head_sha exactly as a pull request passes
-# its base/head, so the group's own diff decides the matrix.
+# its base/head, so the group's own diff decides the matrix. A diff that edits
+# the classifier inputs (`ci-classes.env`, `classify-changes`, `ci-changes`)
+# prints all true: a classifier edit always pays the full matrix rather than
+# classifying itself (BUILD-148).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 usage() {
-    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 case "${1:-}" in
@@ -45,6 +48,11 @@ changed="$(mktemp "${TMPDIR:-/tmp}/gpty-changes.XXXXXX")"
 trap 'rm -f "$changed"' EXIT
 if ! git diff --name-only "$base" "$head" >"$changed"; then
     all_true "cannot diff $base..$head"
+    exit 0
+fi
+classifier="$(grep -m1 -E '^scripts/(ci-classes\.env|classify-changes|ci-changes)$' "$changed" || true)"
+if [ -n "$classifier" ]; then
+    all_true "the diff edits $classifier"
     exit 0
 fi
 printf 'ci-changes: %s changed file(s) in %s..%s\n' \
