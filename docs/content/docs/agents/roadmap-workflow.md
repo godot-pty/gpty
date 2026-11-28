@@ -85,8 +85,8 @@ Never embed an image in an index row, a detail section or a chain page. Release 
 
 ## Closing a row
 
-1. Write the record into the detail section: what shipped, measured numbers (not adjectives), the tests by name, the failure mode now closed.
-2. Close with `./scripts/roadmap close <ID>`. If it cannot find a commit, add the `Roadmap: <ID>` trailer to the fix commit and retry; `--force` is for a row whose work genuinely has no commit.
+1. Write the record to a file whose first line is the row's `**Title** - ...`; `./scripts/roadmap close <ID> --record FILE` validates and writes it and closes in one call. The title must match the index row and the body cannot carry a `Commits:` line; a refusal leaves the row open. `record` remains for rewriting an open row without closing it.
+2. If close cannot find a commit, add the `Roadmap: <ID>` trailer to the fix commit and retry; `--force` is for a row whose work genuinely has no commit.
 3. If the row closed a bug, the fix commit carries a `Cause: <class>` trailer matching [Defect classes](defect-classes.md).
 4. A screenshot reference links the release's `screenshots/<page>.md` as above.
 5. Gates: `python3 scripts/docs-check`, `./scripts/build-docs`; a catalogue edit also runs `./scripts/check-capabilities`.

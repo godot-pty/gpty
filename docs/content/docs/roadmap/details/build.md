@@ -2978,3 +2978,16 @@ scripts/ci-check`, the clean-index `--fast` note, `./scripts/tooling-smoke`, `do
 `roadmap audit`.
 
 Commits: 2874b45, e8b8937
+
+## BUILD-145
+
+**The ledger CLI cannot record and close in one call, and `show` piped to `head` reports a broken pipe** - found
+2026-11-27: the session wrote four record+close pairs (two commands each) and `./scripts/roadmap
+show <ID> | head` printed `roadmap: [Errno 32] Broken pipe`, because `main()` catches
+`BrokenPipeError` as an `OSError` and reports a reader that closed the pipe as an error. Fix:
+`roadmap close <ID> --record FILE` validates the body (the title must equal the index row, a
+`Commits:` line is refused) and writes it before closing, sharing the record body loader; a
+`BrokenPipeError` handler redirects stdout to devnull and exits 0. Tests: `roadmap selftest` covers
+a bad-title `--record` (row stays open), a recorded body with `Commits: unrecorded`, and a 100 KB
+`show` whose reader closes after one line (exit 0, no `Broken pipe`). Docs: the roadmap guide and
+skill name the one-call form.

@@ -54,7 +54,7 @@ A missing toolchain SKIPs locally but FAILS under `CI`/`GITHUB_ACTIONS`, so a lo
 
 ## 6. Close the row
 
-- Rewrite the **detail section** as the record: what shipped, measured numbers (not adjectives), the tests by name, the failure mode now closed. A reader must be able to tell whether it is done without opening the commit. `./scripts/roadmap record <ID> --body-file FILE` writes it (wrapped, and the index row's title must match), `--append` adds a paragraph.
+- Rewrite the **detail section** as the record: what shipped, measured numbers (not adjectives), the tests by name, the failure mode now closed. A reader must be able to tell whether it is done without opening the commit. `./scripts/roadmap record <ID> --body-file FILE` writes it (wrapped, and the index row's title must match), `--append` adds a paragraph; `./scripts/roadmap close <ID> --record FILE` writes the body and closes in one call (the title must match too).
 - `./scripts/roadmap close <ID>` flips `⬜`→`✅` in the index and writes the oldest-first `Commits:` list. If it reports no commit, put `Roadmap: <ID>` in the fix commit's body and retry; `--force` writes `unrecorded` and is only for work with no attributable commit.
 - Closing a bug row means the fix commit declares its `Cause:` class (`docs/content/docs/agents/defect-classes.md`). If that class now has a third member and no mechanical control, add the control's roadmap row now - the class page's review loop owns the threshold.
 - Corrections fold into that row's detail.

@@ -742,3 +742,15 @@ failure mode: it needed a manual edit to name GUI-78. Fix: a `docs-check` rule o
 exactly an index title must be prefixed `AREA-N · `, and every `AREA-N · ` must name a row; the
 `Resize drag`/`First launch` style (an ID plus prose) passes. Tests: extend the docs-check evidence
 fixture with a title-only caption (fails) and an ID-cited caption (passes).
+
+## DOCS-58
+
+**The handoff and wiki-bundle guidance still invites pasted prose and a stale-bundle gate run** - the
+2026-11-27 session's plan was 25.5 KB and the approval inlined it again, largely because it carried
+record and commit prose an implementer could read in the repo; separately the first `tooling-smoke`
+run failed on the knowledge bundle because the bundle was built after the smoke, and the handoff
+guide says "never code bodies" but not "never prose bodies". Fix: the handoff text names paths, edge
+cases, commands and acceptance and forbids code or prose bodies; `testing.md` and
+`skill://gpty-wiki` state that a wiki/docs edit rebuilds the bundle before the smoke/docs gate; the
+roadmap gate table names the wiki build. Tests: the docs gates (`docs-check`, `build-docs --check`,
+`build-wiki --check`) and a read of the three diffs.
