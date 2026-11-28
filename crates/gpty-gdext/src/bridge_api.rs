@@ -36,14 +36,15 @@ impl GptyTerminal {
         arr
     }
 
-    /// Return the application version baked in at compile time (CARGO_PKG_VERSION).
+    /// Return the version this build was produced as (`gpty_core::BUILD_VERSION`:
+    /// `CARGO_PKG_VERSION`, plus the nightly stamp when the build supplied one).
     ///
     /// This is a static method — call it as `GptyTerminal.get_app_version()` from
     /// GDScript. It never changes at runtime and is safe to call before any
     /// terminal is spawned.
     #[func]
     fn get_app_version() -> GString {
-        GString::from(env!("CARGO_PKG_VERSION"))
+        GString::from(gpty_core::BUILD_VERSION)
     }
 
     /// The control-IPC protocol version this build speaks, for the About tab.

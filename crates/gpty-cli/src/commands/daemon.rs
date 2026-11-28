@@ -174,7 +174,7 @@ fn note_gui_version(socket_path: &str, resp: &Response) {
     let Some(line) = stale_binary_line(
         gpty_ipc::protocol::PROTOCOL_VERSION,
         gui_protocol,
-        env!("CARGO_PKG_VERSION"),
+        gpty_core::BUILD_VERSION,
         gui_version,
     ) else {
         return;

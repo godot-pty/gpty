@@ -44,6 +44,13 @@
 //!                                              (check labels → inject command)
 //! ```
 
+/// The version this build was produced as: `CARGO_PKG_VERSION`, or the CI
+/// stamp `<version>-nightly.<YYYYMMDD>+g<sha>` that `build.rs` supplies. The
+/// GUI (the About tab and the IPC `version` reply) and the CLI (`gpty version`
+/// and the stale-binary check) all read this one constant, so the two binaries
+/// cannot disagree about the build they came from.
+pub const BUILD_VERSION: &str = env!("GPTY_BUILD_VERSION");
+
 pub mod agent_state;
 pub mod cli;
 pub mod color;

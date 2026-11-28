@@ -496,7 +496,7 @@ async fn main() {
             }
         }
         Some(Commands::Version) => {
-            println!("gpty {}", env!("CARGO_PKG_VERSION"));
+            println!("gpty {}", gpty_core::BUILD_VERSION);
             println!("protocol: {}", gpty_ipc::protocol::PROTOCOL_VERSION);
             process::exit(0);
         }

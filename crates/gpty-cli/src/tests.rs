@@ -1539,7 +1539,7 @@ async fn plugin_commands_probe_the_gui_version_first() {
             probes_h.fetch_add(1, Ordering::Relaxed);
             // A matching pair: the probe runs, and no warning is printed.
             serde_json::json!({
-                "version": env!("CARGO_PKG_VERSION"),
+                "version": gpty_core::BUILD_VERSION,
                 "protocol": gpty_ipc::protocol::PROTOCOL_VERSION,
             })
         })],
