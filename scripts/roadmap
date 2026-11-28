@@ -4,9 +4,10 @@
 The ledger is the index row on a release chain page (`v*.md`, plus
 `future.md`) joined by ID to the detail section on `details/<area>.md`.
 $ROADMAP_ROOT overrides the read/write tree (default: repository root), so
-mutation commands can be tested on a copy; git history always comes from the
-real repository. Commands: next, show, next-id, add, move, record, close,
-rearea, stats, release-check, audit, selftest.
+mutation commands can be tested on a copy; git history comes from that tree's
+own repository when it is one, else the real repository. Commands: next, show,
+next-id, add, move, record, close, rearea, stats, release-check, audit,
+selftest.
 """
 import argparse
 import json
@@ -19,6 +20,9 @@ import roadmap_lib
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.environ.get('ROADMAP_ROOT') or REPO
+# History is the ledger tree's own when that tree is a checkout (the selftest
+# builds one), else the repository this tool lives in.
+GIT_ROOT = ROOT if os.path.exists(os.path.join(ROOT, '.git')) else REPO
 RM = os.path.join(ROOT, 'docs/content/docs/roadmap')
 DETAILS = os.path.join(RM, 'details')
 ROADMAP_MD = os.path.join(ROOT, 'ROADMAP.md')
@@ -217,7 +221,7 @@ class Ledger:
 
 def git(*args):
     try:
-        proc = subprocess.run(['git', '-C', REPO, *args], text=True, capture_output=True)
+        proc = subprocess.run(['git', '-C', GIT_ROOT, *args], text=True, capture_output=True)
     except OSError as exc:
         die(f'cannot run git: {exc}')
     if proc.returncode:
@@ -233,21 +237,23 @@ def title_body(sec, where):
 
 
 def commits_for(row):
-    """Trailer commits then title line history, deduped oldest first."""
-    found = {}
-    for args in (('log', '--format=%h %ct', '--grep', f'^Roadmap: {row.id}$'),
-                 ('log', '--format=%h %ct', '-S', f'**{row.title}**', '--',
-                  'docs/content/docs/roadmap')):
-        for line in git(*args).splitlines():
-            if line.strip():
-                sha, _, when = line.partition(' ')
-                found.setdefault(sha, int(when or 0))
-    return [sha for sha, _ in sorted(found.items(), key=lambda kv: kv[1])]
+    """The row's work commits, oldest first.
+
+    A fix commit carries the row's `Roadmap:` trailer; the `-S` title search is
+    the fallback for work recorded before the trailer existed, never an addition
+    to it (DOCS-56: mixing them named the row's creation as work).
+    """
+    lines = git('log', '--format=%h %ct', '--grep', f'^Roadmap: {row.id}$').splitlines()
+    if not [line for line in lines if line.strip()]:
+        lines = git('log', '--format=%h %ct', '-S', f'**{row.title}**', '--',
+                    'docs/content/docs/roadmap').splitlines()
+    found = [line.split(' ', 1) for line in lines if line.strip()]
+    return [sha for sha, _ in sorted(found, key=lambda kv: int(kv[1] or 0))]
 
 
 def subject(sha):
     try:
-        proc = subprocess.run(['git', '-C', REPO, 'show', '-s', '--format=%h %s', sha],
+        proc = subprocess.run(['git', '-C', GIT_ROOT, 'show', '-s', '--format=%h %s', sha],
                               text=True, capture_output=True)
     except OSError:
         return None
@@ -789,8 +795,14 @@ def cmd_selftest(args):
     """Exercise the mutation commands on a throwaway ledger fixture."""
     import tempfile
 
+    # A pre-commit hook exports GIT_DIR/GIT_INDEX_FILE/... for the commit it is
+    # validating; a fixture repository must not inherit them, or the fixture's
+    # git commands run against the caller's repository (and its hook). The same
+    # reason scripts/tooling-smoke's secret fixture unsets them.
+    base_env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+
     def child(root, *argv):
-        env = dict(os.environ, ROADMAP_ROOT=root)
+        env = dict(base_env, ROADMAP_ROOT=root)
         return subprocess.run([sys.executable, os.path.abspath(__file__), *argv],
                               env=env, text=True, capture_output=True)
 
@@ -829,6 +841,19 @@ def cmd_selftest(args):
             full = os.path.join(root, relpath)
             os.makedirs(os.path.dirname(full), exist_ok=True)
             write(full, text)
+
+    def fixture_commit(root, message):
+        """Commit the fixture tree; return the new short hash."""
+        def run(*args):
+            proc = subprocess.run(['git', '-C', root, *args], env=base_env,
+                                  text=True, capture_output=True)
+            if proc.returncode:
+                die(f'selftest: git {" ".join(args)} failed: {proc.stderr.strip()}')
+            return proc.stdout.strip()
+        run('add', '-A')
+        run('-c', 'user.name=Roadmap fixture', '-c', 'user.email=fixture@example.invalid',
+            'commit', '-q', '-m', message)
+        return run('rev-parse', '--short', 'HEAD')
 
     other = ('---\ntitle: "Roadmap details - OTHER"\nweight: 900\n'
              'build:\n  list: never\n---\n\nEvery OTHER row.\n')
@@ -1065,8 +1090,33 @@ def cmd_selftest(args):
         err = proc.stderr.read()
         if proc.returncode != 0 or 'Broken pipe' in err or 'roadmap:' in err:
             die(f'selftest: show with a closed pipe exited {proc.returncode}: {err.strip()}')
+
+        # DOCS-56: one trailer commit and a title line with history; only the
+        # trailer names the work.
+        history = os.path.join(root, 'history')
+        fixture(history)
+        subprocess.run(['git', '-C', history, 'init', '-q'], env=base_env,
+                       check=True, capture_output=True)
+        fixture_commit(history, 'fixture: add the row')
+        hist_detail = os.path.join(history, 'docs/content/docs/roadmap/details/test.md')
+        write(hist_detail, read(hist_detail).replace(
+            '**First fixture row** - first body.',
+            '**First fixture row, renamed** - first body.', 1))
+        fixture_commit(history, 'fixture: rename the row')
+        write(hist_detail, read(hist_detail).replace(
+            '**First fixture row, renamed** - first body.',
+            '**First fixture row** - first body.', 1))
+        fixture_commit(history, 'fixture: restore the row title')
+        write(os.path.join(history, 'ROADMAP.md'),
+              read(os.path.join(history, 'ROADMAP.md')) + '\nA later note.\n')
+        trailer = fixture_commit(history, 'fixture: record the work\n\nRoadmap: TEST-1')
+        expect(child(history, 'close', 'TEST-1'), 0, f'closed TEST-1: ✅ {trailer}',
+               'close names only the trailer commit')
+        line = next(x for x in read(hist_detail).split('\n') if x.startswith('Commits: '))
+        if line != f'Commits: {trailer}':
+            die(f'selftest: close wrote {line!r}, wanted only the trailer {trailer}')
     print('selftest: ok (fixture: next/show/close/close-record/rearea/add/move/record/'
-          'stats/release-check/audit/json/dry-run/pipe)')
+          'stats/release-check/audit/json/dry-run/pipe/trailer-commits)')
 
 
 def positive_int(text):
