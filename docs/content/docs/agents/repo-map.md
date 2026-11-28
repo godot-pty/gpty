@@ -28,6 +28,7 @@ gpty/
 │   ├── ci-check                # Run all CI checks locally (--fast for quick)
 │   ├── ci-classes.env         # Changed-path patterns shared by ci-check and classify-changes
 │   ├── classify-changes        # Print the rust/godot/node/macos bits for a path list
+│   ├── ci-changes              # The changes job's BASE..HEAD bits, via classify-changes
 │   ├── tooling-smoke           # bash -n / py_compile / backfill / secret-scan / pr selftest
 │   ├── check-secrets           # Refuse credential formats in the git index (ci-check --fast)
 │   ├── check-macos-minos       # Fail a Mach-O slice built for a newer macOS than the app

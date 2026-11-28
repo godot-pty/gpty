@@ -2995,3 +2995,17 @@ one-call form. Verified with `python3 -m py_compile scripts/roadmap`, `./scripts
 `docs-check` and `roadmap audit`.
 
 Commits: aaf3d22
+
+## BUILD-146
+
+**`docs-check` reads the caller's git index, so a hook's synthetic index fails an unchanged tree** - `docs-check`
+now strips every `GIT_*` variable for its `git ls-files` call, so it lists the tree's own index
+instead of a calling hook's synthetic one. Reproduced with an empty `GIT_INDEX_FILE` (exit 2,
+`cannot list tracked paths with git`) and with a 12-entry index (378 false missing-path/citation
+problems); after the change the same unchanged tree reports `docs-check: OK`.
+
+The docs evidence fixture names a real path in its guide (so the file list is exercised) and runs
+the pass tree with an empty `GIT_INDEX_FILE`, which must still pass. Found while committing PR #80,
+where a hunk-level commit's pre-commit hook blocked the docs gates with those false problems.
+
+Commits: 8b5059c
