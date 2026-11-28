@@ -720,28 +720,32 @@ Commits: 5fbf5b5, 04e689f
 
 ## DOCS-56
 
-**`roadmap close` mixes title-line history into a trailer-based `Commits:` line** - closing DOCS-28
-wrote `Commits: 3153852, 18e42af, 04e689f` and BUILD-90 wrote `9571f98, 18e42af, 9826a57`; only the
-last commit in each list carries the row's `Roadmap:` trailer (the work), while the earlier hashes
-come from `commits_for`'s unconditional `-S "**Title**"` fallback. The guide says the line history
-is the fallback for pre-ledger work, not an addition to a trailer-based list, so the row overstates
-what changed it and `release-check` cannot tell the work commit from the row's creation. Fix: use
-the trailer commits when any exist and run the `-S` fallback only when the trailer set is empty;
-keep oldest-first order. Tests: extend `scripts/roadmap selftest` with a fixture whose title line
-has two historical changes and one trailer commit, and assert `Commits:` names only the trailer.
+**`roadmap close` mixes title-line history into a trailer-based `Commits:` line** - `close` now
+reads the row's `Roadmap:` trailers and runs the `-S "**Title**"` search only when no trailer
+exists, keeping the oldest-first order. A row closed after ledger work therefore lists its work
+commit instead of its creation; DOCS-28 and BUILD-90 keep their historical mixed lines, and the rule
+governs future closes.
+
+The selftest's `trailer-commits` fixture builds a repository whose title line changes across three
+commits and then adds one commit carrying `Roadmap: TEST-1`, and asserts the written line is exactly
+`Commits: <trailer>`. The fixture's git commands strip a caller's `GIT_*` variables, so a
+pre-commit-hook context cannot point them at the real repository.
+
+Commits: fbe0c4c
 
 ## DOCS-57
 
-**The screenshot captions are not gated, so the next caption can drop its row ID** - DOCS-53
-converted `screenshots/v0.8.md`'s 73 captions to 87 `ID · title` references with a one-off script,
-and `docs-check` still validates only the page's front matter, `## Screenshots` heading, line cap
-and links; a new caption, or a retitle that edits an index row, can leave a title-only reference or
-an ID naming no row without failing a gate. The one dependent caption ("Resize drag") shows the
-failure mode: it needed a manual edit to name GUI-78. Fix: a `docs-check` rule over
-`screenshots/*.md` - in each caption's `row:`/`rows:` sentence, every emphasized span that is
-exactly an index title must be prefixed `AREA-N · `, and every `AREA-N · ` must name a row; the
-`Resize drag`/`First launch` style (an ID plus prose) passes. Tests: extend the docs-check evidence
-fixture with a title-only caption (fails) and an ID-cited caption (passes).
+**The screenshot captions are not gated, so the next caption can drop its row ID** - `docs-check`
+now reads each screenshot caption's `row:`/`rows:` sentence: an emphasized span that is exactly an
+index title must carry its `AREA-N · ` prefix, and every `AREA-N · ` must name a row. On the current
+corpus it found exactly the two 0.7.2 captions, whose `*Small windows adapt instead of clipping*`
+now cites `GUI-77 · Small windows adapt instead of clipping`, and no unknown ID.
+
+The docs evidence fixture runs three caption trees: the ID-cited `*TEST-1 · First fixture row*`
+passes, a bare title fails with `without its row ID`, and `*TEST-9 · First fixture row*` fails with
+`caption cites unknown row TEST-9`.
+
+Commits: 5a45572, e109329
 
 ## DOCS-58
 
