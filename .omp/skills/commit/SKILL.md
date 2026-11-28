@@ -108,9 +108,8 @@ Commit is the half you can check locally. When the project validates on a remote
 
 ```bash
 ./scripts/pr push                # the split push; or git push origin HEAD with your key
-gh run list --workflow=CI --limit 1 --json databaseId,headSha   # confirm headSha matches
+./scripts/pr checks <pr>         # run id, job class (ran/skipped), required summary; --json
 gh run watch <id> --interval 20 --exit-status
-gh run view <id> --json conclusion,jobs --jq '"run=" + .conclusion, (.jobs[] | "  \(.name): \(.conclusion)")'
 ```
 
 A range that edits `.github/workflows/**` cannot be pushed by the app: the installation grants only `contents`, `metadata` and `pull_requests`, and GitHub refuses an App push that creates or updates a workflow ("refusing to allow a GitHub App to create or update workflow … without `workflows` permission") — measured 2026-11-17, after the whole pre-push gate had already run. `scripts/pr push` owns that split: it pushes the newest workflow-touching commit with the maintainer's `gh` token (through `GIT_ASKPASS`, never argv) and then pushes a final non-workflow commit as the app. It refuses when the newest commit is the workflow one, so add a non-workflow commit after it. Measured 2026-11-25: SSH dies with `SIGPIPE` (exit 141) right after the hook when the full gate keeps the connection idle for ~6 minutes; push that first range over HTTPS with the maintainer's `workflow`-scoped token instead - `gh auth token` into a 0600 file, `GIT_ASKPASS=scripts/git-askpass-token`, and `https://<login>@github.com/godot-pty/gpty.git` (the token stays out of argv). The later bot push is docs-only, so its hook is seconds. The app is the last pusher, so the maintainer's approval satisfies `main`'s last-push rule; `scripts/pr push` does both pushes, and `scripts/pr open` opens the PR. Do not grant the App Workflows write: a same-repository PR workflow runs with repository secrets before any human merges it.

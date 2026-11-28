@@ -5,6 +5,7 @@
 #   scripts/pr push   [--key PATH] [--base BRANCH] [--dry-run] [BRANCH]
 #   scripts/pr open   [--key PATH] [--base BRANCH] [--title TITLE] [--body-file FILE]
 #   scripts/pr wait   [PR] [--base BRANCH] [--timeout SEC] [--interval SEC]
+#   scripts/pr checks [PR] [--json]
 #   scripts/pr land   PR [--approve] [--dry-run] [--base BRANCH] [--timeout SEC] [--interval SEC]
 #   scripts/pr prune  [--dry-run]
 #   scripts/pr selftest
@@ -34,6 +35,7 @@ commands:
   push   [--key PATH] [--base BRANCH] [--dry-run] [BRANCH]
   open   [--key PATH] [--base BRANCH] [--title TITLE] [--body-file FILE]
   wait   [PR] [--base BRANCH] [--timeout SEC] [--interval SEC]
+  checks [PR] [--json]
   land   PR [--approve] [--dry-run] [--base BRANCH] [--timeout SEC] [--interval SEC]
   prune  [--dry-run]
   selftest
@@ -184,6 +186,97 @@ wait_pr() {
         fi
         sleep "$interval"
     done
+}
+
+# Format a checks document and return 0/1 on its `ok`. Pure, so `pr selftest`
+# feeds it fixtures without gh or the network.
+checks_report() {
+    local doc=$1
+    jq -r '
+      "pr: #\(.pr) \(.head.ref) \(.head.sha[0:7])",
+      (if .ci == null then "pr: CI run none"
+       else "pr: CI \(.ci.run) \(.ci.conclusion // .ci.status) - \(.ci.jobs.total) jobs: \(.ci.jobs.success) success, \(.ci.jobs.skipped) skipped, \(.ci.jobs.failed) failed, \(.ci.jobs.pending) pending" end),
+      (if ((.ci // {} | .jobs // {} | .skipped_names // []) | length) > 0
+       then "pr: skipped \(.ci.jobs.skipped_names | join(", "))" else empty end),
+      (if (.required | length) == 0 then "pr: required none"
+       else ("pr: required \(([.required[] | select(.bucket == "pass")] | length))/\(.required | length) pass" +
+         (if ([.required[] | select(.bucket != "pass")] | length) > 0
+          then " (\([.required[] | select(.bucket != "pass") | "\(.name): \(.bucket)"] | join(", ")))" else "" end))
+       end)
+    ' <<<"$doc"
+    [ "$(jq -r '.ok' <<<"$doc")" = "true" ]
+}
+
+# A compact snapshot of a PR's check class and required set: one line for the
+# head, one for the CI run's success/skipped/failed counts, the skipped names,
+# and the required contexts read from the live `main protection` ruleset.
+cmd_checks() {
+    local pr="" json=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json) json=true; shift ;;
+            -h|--help) usage; exit 0 ;;
+            -*) die "checks: unknown option $1" ;;
+            *) [ -z "$pr" ] || die "checks: one PR number only"; pr=$1; shift ;;
+        esac
+    done
+    need_gh
+    local pr_json number head_sha run_json run_id jobs checks doc repo_name ruleset_id required
+    if [ -n "$pr" ]; then
+        pr_json=$(gh pr view "$pr" --json number,headRefName,headRefOid 2>/dev/null) || {
+            printf 'pr: cannot read PR #%s\n' "$pr" >&2; exit 2; }
+    else
+        pr_json=$(gh pr view --json number,headRefName,headRefOid 2>/dev/null) || {
+            printf 'pr: no PR for the current branch; name one\n' >&2; exit 2; }
+    fi
+    number=$(jq -r '.number' <<<"$pr_json")
+    head_sha=$(jq -r '.headRefOid' <<<"$pr_json")
+    run_json=$(gh run list --commit "$head_sha" --event pull_request --workflow CI --limit 1 \
+        --json databaseId,status,conclusion 2>/dev/null | jq '.[0] // empty' || true)
+    if [ -n "$run_json" ] && [ "$run_json" != "null" ]; then
+        run_id=$(jq -r '.databaseId' <<<"$run_json")
+        jobs=$(gh run view "$run_id" --json jobs --jq '.jobs' 2>/dev/null || echo '[]')
+    else
+        run_json="null"
+        jobs='[]'
+    fi
+    checks=$(gh pr checks "$number" --json name,state,bucket 2>/dev/null || true)
+    [ -n "$checks" ] || checks='[]'
+    repo_name=$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || {
+        printf 'pr: cannot read the repository name\n' >&2; exit 2; }
+    ruleset_id=$(gh api "repos/$repo_name/rulesets" \
+        --jq '.[] | select(.name == "main protection") | .id' 2>/dev/null | head -1 || true)
+    if [ -z "$ruleset_id" ]; then
+        printf 'pr: cannot read the required checks (ruleset API)\n' >&2; exit 2
+    fi
+    required=$(gh api "repos/$repo_name/rulesets/$ruleset_id" \
+        --jq '[.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | sort' \
+        2>/dev/null) || {
+        printf 'pr: cannot read the required checks (ruleset API)\n' >&2; exit 2; }
+    doc=$(jq -n --argjson pr "$pr_json" --argjson run "$run_json" --argjson jobs "$jobs" \
+        --argjson checks "$checks" --argjson required "$required" '
+        {
+          pr: $pr.number,
+          head: {ref: $pr.headRefName, sha: $pr.headRefOid},
+          ci: (if $run == null then null else
+            {run: $run.databaseId, status: $run.status, conclusion: $run.conclusion,
+             jobs: {total: ($jobs | length),
+                    success: ([$jobs[] | select(.conclusion == "success")] | length),
+                    skipped: ([$jobs[] | select(.conclusion == "skipped")] | length),
+                    failed: ([$jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out")] | length),
+                    pending: ([$jobs[] | select(.conclusion == null)] | length),
+                    skipped_names: [$jobs[] | select(.conclusion == "skipped") | .name],
+                    failed_names: [$jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out") | .name]}}
+          end),
+          required: [ $required[] as $name | ((first($checks[] | select(.name == $name))) // {name: $name, state: "missing", bucket: "missing"}) ],
+          ok: ((([ $required[] as $name | ((first($checks[] | select(.name == $name))) // {bucket: "missing"}) | .bucket ] | all(.[]; . == "pass")) and (($required | length) > 0)))
+        }')
+    if $json; then
+        jq . <<<"$doc"
+        [ "$(jq -r '.ok' <<<"$doc")" = "true" ]
+    else
+        checks_report "$doc"
+    fi
 }
 
 prune_branches() {
@@ -546,13 +639,32 @@ cmd_selftest() {
     if land_refusal app/gpty-bot REVIEW_REQUIRED 2>/dev/null; then
         die "selftest: an unapproved bot PR was allowed"
     fi
-    printf 'pr: selftest passed (split, W==HEAD refusal, remote containment, land refusals)\n'
+
+    if command -v jq >/dev/null 2>&1; then
+        local doc out
+        doc='{"pr":75,"head":{"ref":"docs/x","sha":"0123456789abcdef"},"ci":{"run":1,"status":"completed","conclusion":"success","jobs":{"total":15,"success":5,"skipped":10,"failed":0,"pending":0,"skipped_names":["rust-tests","windows"],"failed_names":[]}},"required":[{"name":"ci-gate","state":"success","bucket":"pass"},{"name":"secret-scan","state":"success","bucket":"pass"}],"ok":true}'
+        out="$(checks_report "$doc")" || die 'selftest: checks report rejected a passing document'
+        printf '%s\n' "$out" | grep -q '10 skipped' || die 'selftest: checks report lost the skipped count'
+        printf '%s\n' "$out" | grep -q 'required 2/2 pass' || die 'selftest: checks report lost the required pass count'
+        doc='{"pr":75,"head":{"ref":"docs/x","sha":"0123456789abcdef"},"ci":null,"required":[{"name":"ci-gate","state":"failure","bucket":"fail"},{"name":"secret-scan","state":"success","bucket":"pass"}],"ok":false}'
+        if checks_report "$doc" >/dev/null; then
+            die 'selftest: checks report accepted a failed required check'
+        fi
+        doc='{"pr":75,"head":{"ref":"docs/x","sha":"0123456789abcdef"},"ci":null,"required":[{"name":"ci-gate","state":"pending","bucket":"pending"},{"name":"secret-scan","state":"missing","bucket":"missing"}],"ok":false}'
+        if checks_report "$doc" >/dev/null; then
+            die 'selftest: checks report accepted a pending required check'
+        fi
+    else
+        printf 'pr: selftest: skip checks report (jq not installed)\n'
+    fi
+    printf 'pr: selftest passed (split, W==HEAD refusal, remote containment, land refusals, checks report)\n'
 }
 
 case "${1:-}" in
     push) shift; cmd_push "$@" ;;
     open) shift; cmd_open "$@" ;;
     wait) shift; cmd_wait "$@" ;;
+    checks) shift; cmd_checks "$@" ;;
     land) shift; cmd_land "$@" ;;
     prune) shift; cmd_prune "$@" ;;
     selftest) shift; cmd_selftest "$@" ;;

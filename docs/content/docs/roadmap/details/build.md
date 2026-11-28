@@ -2948,3 +2948,32 @@ the rule DOCS-55 established for PR runs stops at the queue. Fix: in the `change
 class into the merge-group head; keep the full matrix for a code range. Tests: a `merge_group`
 fixture exercising `scripts/classify-changes` and the job's output; measure the queue wall time for
 a docs PR.
+
+## BUILD-143
+
+**`scripts/pr` cannot print a PR's check class, so the run is read by hand** - found 2026-11-27:
+proving the class of PRs #75/#76/#77 took three separate `gh run list`/`gh run view --json jobs`
+calls; #75 and #77 skipped 10 of 15 CI jobs while #76 ran all 15, and the required set (`ci-gate`,
+the four `Analyze (…)` jobs, `secret-scan`) had to be read from the wrap-up skill's prose. The
+information is all in the PR, the CI run and the live `main protection` ruleset, but no command
+joins them. Fix: `scripts/pr checks [PR] [--json]` - resolve the PR and its head, fetch the
+pull_request CI run and its jobs, read the required contexts from the ruleset, match them against
+`gh pr checks`, and print one line per category: the head, the CI run with
+success/skipped/failed/pending counts and the skipped names, and the required pass count with any
+failing name. Exit 0 when every required check passes, 1 when one does not (including missing), 2 on
+a read failure. Tests: `pr selftest` fixtures for a docs-class run (10 skipped, 6/6 required), a
+failed required check and a pending/missing one; `./scripts/pr checks 75` and `76 --json` on the
+real PRs.
+
+## BUILD-144
+
+**`ci-check --fast` runs the whole fast set when the index is empty, and the guide says to run it before staging** - found
+2026-11-27: two manual `ci-check --fast` runs before staging took 22 s each and ran
+media/fmt/workflows/docs/capabilities/secrets/theme/guards/ffi/log/lock/clippy/cost/tooling, while
+the pre-commit hook's staged index classifies docs and tooling changes to a subset; the commit skill
+told the reader to run `--fast` before staging, where `git diff --cached` is empty and the class
+checks cannot fire. Fix: when `--fast` has no `CI_CHECK_RANGE_FROM` and an empty index, print a note
+that the whole fast set runs and that staging first (or the pre-commit hook) classifies the range;
+correct the commit guide's step 1 and pre-commit bullet and testing.md so they say the hook runs the
+staged index. Tests: a clean-index run prints the note; a staged docs range still selects the docs
+subset (existing `docs_class_change`); the pre-commit hook's output is the proof.
