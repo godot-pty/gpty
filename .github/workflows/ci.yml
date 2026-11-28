@@ -36,7 +36,9 @@ jobs:
   # path filter cannot do this (the required context would never be reported);
   # a skipped job reports success, so a full-suite job gated on one bit keeps
   # the required check satisfied. An unclassified path sets every bit, and a
-  # merge-queue group always runs the full matrix (the gate before `main`).
+  # merge-queue group classifies its own diff (`base_sha..head_sha`, the union
+  # of the group's PRs), so a docs-only group skips the matrix its
+  # pull-request run skipped.
   changes:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -55,32 +57,9 @@ jobs:
       - name: Classify changed paths
         id: filter
         env:
-          EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD: ${{ github.event.merge_group.head_sha || github.sha }}
-        run: |
-          set -euo pipefail
-          all_true() {
-            printf 'rust=true\ngodot=true\nnode=true\nmacos=true\n' >> "$GITHUB_OUTPUT"
-          }
-          if [ "$EVENT" = merge_group ]; then
-            all_true
-            echo "merge queue: running the full matrix"
-            exit 0
-          fi
-          if [ -z "${BASE:-}" ] || [[ "$BASE" =~ ^0+$ ]]; then
-            all_true
-            echo "no base commit; running the full matrix"
-            exit 0
-          fi
-          if ! git diff --name-only "$BASE" "$HEAD" > /tmp/changed; then
-            all_true
-            echo "cannot diff $BASE..$HEAD; running the full matrix"
-            exit 0
-          fi
-          bits="$(./scripts/classify-changes < /tmp/changed)"
-          printf '%s\n' "$bits" >> "$GITHUB_OUTPUT"
-          printf 'changed files: %s\n%s\n' "$(wc -l < /tmp/changed)" "$bits"
+        run: ./scripts/ci-changes >> "$GITHUB_OUTPUT"
 
   # ── Workflow linting (YAML syntax) ────────────────────────────────────
   lint-workflows:

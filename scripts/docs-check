@@ -17,6 +17,8 @@ checks against a fixture copy.
     a closed row's `Commits:` line, valid code citations, no images
   * roadmap screenshot pages: front matter and a `## Screenshots` section, and
     no captures on a queue page
+  * roadmap screenshot captions: the `row:`/`rows:` sentence cites a row as
+    `AREA-N · title` (a bare index title and an unknown ID both fail)
   * roadmap detail and screenshot pages: no line over 768 bytes (the width a
     7 KB evidence line broke), and every screenshot page is linked from a page
     outside `screenshots/` (an orphan page loses its captures)
@@ -277,6 +279,7 @@ for p in sorted(os.listdir(os.path.join(ROOT, rd))):
         if title in seen_titles:
             bad(where, f'title duplicates {seen_titles[title]}: {title[:60]}')
         seen_titles[title] = where
+    title_rows = {title: rid for rid, title in index_titles.items()}
 
 details_dir = f'{rd}/details'
 detail_of = {}
@@ -369,6 +372,28 @@ if os.path.isdir(os.path.join(ROOT, shots_dir)):
                 bad(where, f'front matter needs {field}')
         if not re.search(r'(?m)^## Screenshots$', text):
             bad(where, 'screenshot page needs a `## Screenshots` section')
+        # A caption's row sentence is its citation: DOCS-53 converted 73
+        # captions to `ID · title` by script, and a later edit could silently
+        # drop the ID (`Small windows adapt instead of clipping`) or invent one.
+        for cap in re.finditer(r'(?m)^\*\*.*(?:\n(?!\s*\n).*)*', text):
+            row = re.search(r'\brows?:\s*(.*)', cap.group(0), re.S)
+            if not row:
+                continue
+            at = f'{where}:{text.count(chr(10), 0, cap.start()) + 1}'
+            sent = row.group(1)
+            stop = re.search(r'[.!?](?=\s|$)', sent)
+            if stop:
+                sent = sent[:stop.end()]
+            for span in re.finditer(r'\*\*([^*\n]+)\*\*|\*([^*\n]+)\*', sent):
+                inner = (span.group(1) or span.group(2)).strip()
+                rid = title_rows.get(inner)
+                if rid is None or sent[:span.start()].rstrip().endswith(f'{rid} ·'):
+                    continue
+                bad(at, f'caption cites the title {inner!r} without its row ID '
+                        f'(cite {rid} · {inner})')
+            for ref in re.finditer(r'([A-Z]+-\d+)\s*·', sent):
+                if ref.group(1) not in seen:
+                    bad(at, f'caption cites unknown row {ref.group(1)}')
 
 # ── site paths ───────────────────────────────────────────────────────────
 # The docs site is served from the domain root (docs/hugo.yaml baseURL), so a

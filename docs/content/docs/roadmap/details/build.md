@@ -2924,30 +2924,32 @@ Commits: e08a654
 
 ## BUILD-141
 
-**The pre-push `--stamped` gate runs the full suite on a new tree** - found 2026-11-27: the
-docs-only branch's first push ran `--stamped --summary` for 242 s (Rust, GUT, smoke, audit, deny)
-while its remote PR run 46079616356 skipped every heavy job, and the gate branch's first push took
-243 s. `ci-check`'s `--stamped` help says "skip when the clean-tree stamp matches; else run the full
-gate", so the class selection a hand run (`--classify`, `--fast`) performs is not applied to the
-first push of a new tree; the commit skill's "a docs edit ... never buys the Rust, GUT and smoke
-jobs" is therefore false on the hook path. Fix: when no stamp matches, classify the pushed range the
-hook already passes (`CI_CHECK_RANGE_FROM`) and select the docs/tooling class, then seed the stamp
-with that run; keep the full suite for a code range. Tests: extend the pre-push refs fixture in
-`scripts/tooling-smoke` with a docs-class range and assert the selected steps exclude
-`tests`/`gut`/`smoke`, and a code range still selects them; measure before/after on a docs push.
+**The pre-push `--stamped` gate runs the full suite on a new tree** - the clean-tree stamp is now an
+outcome, never a selection input: `--stamped` with no matching stamp classifies the pushed range
+(`CI_CHECK_RANGE_FROM`) exactly like a hand run, selects the docs/tooling/code class, and writes the
+stamp when that run passes on a clean tree. `--classify` prints the selected step ids.
+
+Measured on the branch's first, docs-only commit: `CI_CHECK_RANGE_FROM=HEAD^ ./scripts/ci-check
+--stamped --summary` ran `workflows docs capabilities secrets cost` in 5 s with no
+`tests`/`gut`/`smoke` log, against the 242 s the same first push cost before. The temp-repository
+fixture asserts a docs range excludes `tests`/`gut`/`smoke` and a code range keeps them.
+
+Commits: e109329, 10ee851, 59dfac4
 
 ## BUILD-142
 
-**A docs-only PR still pays the full matrix in the merge queue** - PR #75 (docs) ran the cheap set
-on its pull_request run (46079616356: rust, gut, windows, macos, static, audit and fuzz skipped) but
-its merge-group run 46080254384 set `all_true` in the `changes` job and ran Rust, GUT, Windows,
-macOS, static, fuzz, cargo-audit and cargo-deny; the land wait was 954 s, and PR #76's queue run
-took 1511 s. The merge queue is the remote gate, but a docs-only diff cannot affect those jobs, so
-the rule DOCS-55 established for PR runs stops at the queue. Fix: in the `changes` job, classify the
-`merge_group` diff (`BASE..HEAD` from the event) instead of forcing all true, or carry the PR's
-class into the merge-group head; keep the full matrix for a code range. Tests: a `merge_group`
-fixture exercising `scripts/classify-changes` and the job's output; measure the queue wall time for
-a docs PR.
+**A docs-only PR still pays the full matrix in the merge queue** - the `changes` job's classifier is
+now `scripts/ci-changes`, which prints the four bits for the event's `BASE..HEAD`; the merge-group
+branch that forced every bit true is gone, so a group classifies its own diff (`base_sha..head_sha`,
+the union of the group's PRs). A missing base, a diff git cannot compute, or an unclassified path
+still prints all true, so an unknown tree runs the full matrix rather than skipping it.
+
+The `ci-changes` fixture covers a docs diff (all false), a Rust diff (`rust=true`, `godot=false`), a
+missing base (all true) and an unclassified path (all true). The queue's after-number needs a
+docs-only merge group, so PR #75's 954 s stays the baseline in this record; this change's own PR is
+code-class (it edits `scripts/ci-check`), and the next docs-only group reports the new number.
+
+Commits: e109329, 98c8f4f, 59dfac4
 
 ## BUILD-143
 
