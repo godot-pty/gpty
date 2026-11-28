@@ -498,6 +498,29 @@ jobs:
             "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" \
             "gdext-artifacts/gpty-macos-ffmpeg"
 
+      # The SBOM's Rust half. `cargo tree` for each target the archives ship,
+      # with the dev and optional edges gone, is the set the binaries were
+      # compiled from - the same set `cargo-auditable` would embed, read from the
+      # pinned lockfile so the release needs no special build and the generator
+      # parses no ELF, PE or Mach-O container.
+      - name: Install Rust toolchain
+        run: ./scripts/install-rust
+
+      - name: Collect the crate inventory
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/crates.txt"
+          : > "$out"
+          for target in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc \
+              aarch64-apple-darwin x86_64-apple-darwin; do
+            for pkg in gpty gpty-gdext; do
+              cargo tree --locked -p "$pkg" -e normal,build --target "$target" \
+                --prefix none --format '{p}|{l}' >> "$out"
+            done
+          done
+          sort -u -o "$out" "$out"
+          echo "crate inventory: $(wc -l < "$out") lines across 4 targets"
+
       # The SBOM is the bill of materials of what the three downloads contain,
       # so the payloads are extracted and the assets the export compiles into
       # `gpty-gui.pck` are staged beside them under their repository paths. The
@@ -517,7 +540,8 @@ jobs:
           cp -a godot/fonts "$S/embedded/godot/fonts"
           cp -a godot/assets/fonts "$S/embedded/godot/assets/fonts"
           cp -a godot/schemes "$S/embedded/godot/schemes"
-          ./scripts/bundle-sbom "$S" "$VERSION" "$D/gpty-${VERSION}.spdx.json"
+          ./scripts/bundle-sbom "$S" "$VERSION" "$D/gpty-${VERSION}.spdx.json" \
+            --crates "$RUNNER_TEMP/crates.txt"
 
       # Three archives, their bill of materials and one checksum file, nothing
       # else. The per-library assets (the GDExtension and its pinned FFmpeg) are

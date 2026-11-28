@@ -3096,3 +3096,22 @@ components that are not in the shipped bytes. Verified by `bundle-sbom --self-te
 fixture binary with two crates and by `spdx-tools` still validating the document; acceptance is the
 next release's SBOM naming the crates the binary carries, with the count matching its own `cargo
 tree` set, and the provenance and SBOM attestations still verifying.
+
+**Delivered with a different mechanism, and why.** The crates come from
+`cargo tree --locked -e normal,build --target <triple>` over the four shipped
+targets, unioned, rather than from a `cargo auditable` build: it is the same
+compiled set, it needs no special build in four jobs and no pinned installer,
+and it leaves `bundle-sbom` without an ELF/PE/Mach-O section parser - the macOS
+CLI is a universal binary, so reading `.dep-v0` there would have meant three
+container formats with no way to exercise them in `--self-test`. The set is
+179 `cargo tree` lines, 152 unique after `cargo`'s `(*)` dedupe markers, 145
+after the seven workspace crates (which are the `gpty` package). `spdx-tools`
+rejected two defects the first draft had and both are now asserted in
+`--self-test`: crate ids must carry the version (bitflags ships at two) and a
+crate named `godot` collided with the engine package, and older manifests spell
+a disjunction with slashes (`Apache-2.0/MIT`) which is normalised to `OR`
+while an unreadable expression degrades to `NOASSERTION` instead of failing a
+release. Validated: 151 packages, 0 `NOASSERTION` licences, `pyspdxtools -i`
+exit 0.
+
+Commits: d871af5
