@@ -3113,3 +3113,5 @@ a disjunction with slashes (`Apache-2.0/MIT`) which is normalised to `OR`
 while an unreadable expression degrades to `NOASSERTION` instead of failing a
 release. Validated: 151 packages, 0 `NOASSERTION` licences, `pyspdxtools -i`
 exit 0.
+
+Commits: d871af5
