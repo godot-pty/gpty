@@ -18,7 +18,7 @@ The source of truth for all `gPTY` features; past, present, and planned.
 - [v0.6 - Knowledge Base & Wiki](docs/content/docs/roadmap/v0.6.md) - released, 0 open
 - [v0.7 - Media Pane & Trust Boundary](docs/content/docs/roadmap/v0.7.md) - released, 0 open
 - [v0.8 - UI/UX & Graphical Fidelity](docs/content/docs/roadmap/v0.8.md) - in progress, 16 open
-- [v0.9 - Instrumentation, Fidelity & Health](docs/content/docs/roadmap/v0.9.md) - planned, 99 open
+- [v0.9 - Instrumentation, Fidelity & Health](docs/content/docs/roadmap/v0.9.md) - planned, 95 open
 - [v0.10 - Headless Daemon & Reattach](docs/content/docs/roadmap/v0.10.md) - planned, 8 open
 - [v0.11 - Game Pane](docs/content/docs/roadmap/v0.11.md) - planned, 16 open
 - [v0.12 - Knowledge Base Follow-ups](docs/content/docs/roadmap/v0.12.md) - planned, 22 open

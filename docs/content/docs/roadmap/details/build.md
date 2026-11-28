@@ -1601,6 +1601,8 @@ user; a deliberately failed platform build leaves the previous nightly downloada
 reference them; README gains a Nightly line beside the release badge; `./scripts/lint-workflows` and
 `./scripts/ci-check` pass.
 
+Commits: 3094302
+
 ## BUILD-77
 
 **A tag release still builds every platform cold, and a cold build is where the release wall time goes** - **the
@@ -1769,6 +1771,8 @@ the five most recent releases with provenance 10 and a signature 8 per release, 
 carrying the bundle is 2 (+0.15 overall, back to 8.0) and all five backfilled is 10 (+0.77, overall
 8.6); this is the largest lever left.
 
+Commits: 3094302
+
 ## BUILD-83
 
 **The fuzz workspace's committed lockfile went stale and fed a vulnerable dependency to the dependency graph** - fixed
@@ -1862,6 +1866,8 @@ attach it to the release and `SHA256SUMS`, and attest it with `actions/attest`'s
 current `actions/attest-build-provenance@v2` only produces provenance; v4 `actions/attest` takes the
 SBOM). Acceptance: the next release has the SBOM, `gh attestation verify` sees the SBOM predicate,
 and the FFmpeg/font components are listed.
+
+Commits: 3094302
 
 ## BUILD-88
 
@@ -2026,6 +2032,8 @@ make the boundary worth automating. Optional for this release. Fix: a `REUSE.tom
 core and the permissive exceptions, SPDX headers where practical, and `reuse lint` in `ci-check` (no
 headers in JSON). Acceptance: `reuse lint` passes and the license boundary is readable without
 opening LICENSE-EXCEPTIONS.
+
+Commits: f68dddf
 
 ## BUILD-96
 
