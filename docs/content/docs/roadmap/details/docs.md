@@ -759,3 +759,15 @@ evidence. Verified with `python3 scripts/docs-check`, `./scripts/build-docs --ch
 `./scripts/roadmap audit` and `./scripts/ci-check --only docs`.
 
 Commits: aaf3d22, 6a49564
+
+## DOCS-59
+
+**The v0.8.9 changelog records the performance release** - release-time: write
+`docs/content/docs/changelog/v0.8.9.md`, link it from `CHANGELOG.md`, and cover the Performance
+section, the three presets and the derived Custom, the renderer override and the restart flow, the
+measured cold/warm numbers, the vault graph's MSAA/render-scale/glow/fog rows, low-processor mode,
+and the moved frame cap and V-Sync. Use the captured `settings-performance` image and the preset
+table from GUI-189 rather than re-deriving them.
+
+Acceptance: `python3 scripts/docs-check` and `./scripts/build-docs --check` pass; the changelog
+index and the release page agree on the linked version.

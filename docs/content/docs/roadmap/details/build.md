@@ -3045,3 +3045,28 @@ PR's `ci.yml`, so a workflow edit can still weaken its own gate; review is the c
 `CODEOWNERS` names the maintainer for every path.
 
 Commits: 5fec2ae
+
+## BUILD-149
+
+**Each performance preset has a measured cold and warm cost** - GUI-189's renderer hints quote the
+2026-11-22 bake-off on the 0.8.5 build (667 MB warm / 1083 MB cold on Forward+, 310/363 on
+Compatibility, 592 warm on Mobile with one pane). The current build is reported at ~1 GB cold and
+800-900 MB warm, and BUILD-73 records a ~130 MB growth in the v0.8.6 Forward+ baseline, so those
+hints may already be stale. A preset that ships with the wrong number is the failure this row
+closes.
+
+Extend `scripts/measure-cost` with a passthrough for the launch method (`--rendering-method
+<method>`) and a seeded low-processor setting in its per-run sandbox; the script already owns the
+private sandbox, the discarded warm-up launch, the steady-state sample and the median. Measure
+Quality (Forward+), Balanced (Forward+), Mobile (manual) and Memory saver (Compatibility) cold and
+warm, three runs each, and record the run with `--record` so `docs/data/cost-history.json` and the
+chart carry it. Update GUI-189's tooltip/detail with the measured numbers if they differ from the
+bake-off. Add a 30-second idle-CPU sample per low-processor setting with the same sandbox method,
+recorded in this detail; it is the number GUI-147 will use, so do not invent one. BUILD-72's budget
+table takes these figures and BUILD-73's diagnostic uses the Forward+ cold/warm pair. The edit
+touches `scripts/measure-cost`, a tooling-class script, so run the tooling gates the classifier
+names alongside the cost gates.
+
+Acceptance: a cold/warm table per preset in the detail; `./scripts/measure-cost --check` and
+`scripts/render-cost-chart --check --require-current` pass; every number in the Performance section
+matches the table. Depends on GUI-189.

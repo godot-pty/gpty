@@ -3510,11 +3510,14 @@ sets no `application/run/low_processor_mode`, so the engine's default continuous
 while the terminal has no output, the cursor is not blinking and the user is not typing;
 `Engine.max_fps` is only a cap and its default is 0 (unlimited) through
 `SettingsManager.cfg_max_fps` (`godot/scenes/autoloads/settings_manager.gd:69`, applied at
-`godot/scenes/terminal/workspace.gd:416-424`). The engine key is `run/low_processor_mode` under
-`[application]` (full name `application/run/low_processor_mode`; the widely cited
-`low_processor_usage_mode` is not a 4.7 setting), with `run/low_processor_mode_sleep_usec`
-defaulting to 6900 microseconds. The one explicit per-frame redraw found in the audit is
-`AgentBadge._process` (`godot/scenes/ui/agent_badge.gd:101-103`), already gated by
+`godot/scenes/terminal/workspace.gd:416-424`). The project key is
+`application/run/low_processor_mode`, with `application/run/low_processor_mode_sleep_usec`
+defaulting to 6900 microseconds; the runtime seam is `OS.low_processor_usage_mode` /
+`OS.low_processor_usage_mode_sleep_usec`. GUI-189 exposes that seam in the Performance section with
+`cfg_low_processor` defaulting false (the current project default), so when this row turns the
+project default on it must update GUI-189's default and the Quality preset in the same change, or
+the runtime apply will turn the idle loop back off. The one explicit per-frame redraw found in the
+audit is `AgentBadge._process` (`godot/scenes/ui/agent_badge.gd:101-103`), already gated by
 `set_process(animated(_state))`, so the render loop, not a GDScript timer, is the cost. Fix: (1) set
 `run/low_processor_mode=true` and keep the 6900 microsecond sleep in `project.godot`; (2) prove a
 visible animation still draws (cursor blink, the ambient effect when enabled) and an idle window
@@ -4239,3 +4242,161 @@ it, or keep the per-pane override and re-apply the pane's own value after the br
 `paneSet` a pane's `max_fps` to 30, `SettingsManager.save_settings()`, and assert the pane still
 reads 30 (override) or that `paneSet` refused with a reason; `paneSettings` and the test agree on
 the flags.
+
+## GUI-189
+
+**The Settings panel has a Performance section with a preset and live quality rows** - the window's
+Forward+ cost is the product's largest fixed expense: the 2026-11-22 bake-off on the 0.8.5 build
+measured 667 MB warm / 1083 MB cold with one pane, against 310/363 on Compatibility and 592 warm on
+Mobile (`docs/content/docs/agents/testing.md`). Today the renderer is a command-line flag
+(`--rendering-method`/`--rendering-driver`) and the graph's MSAA is a constant at
+`godot/scenes/ui/vault_graph_3d.gd:349`; there is no surface to trade quality for memory, no
+low-processor switch, and no place to see which renderer is running. This row adds one Performance
+section to Settings. It follows the game-menu grammar the 2018 Game Developer settings checklist and
+Longshot's settings page use: a preset plus individual rows, restart-only rows labelled, unsupported
+rows disabled with a reason (gPTY's convention, where games hide them), live rows applied at once, a
+preset derived from the values so it never lies, and measured numbers in the hints, not adjectives.
+
+**Section and rows.** `SettingsPanel.SETTINGS_SECTIONS` gains `"performance"` after `"system"`
+(`godot/scenes/ui/settings_panel.gd:17`), `SECTION_TITLES` gains `Performance`, `_build_ui` creates
+`_create_section("performance")` after System, and `_add_section_reset` restores the defaults below.
+Blocked by GUI-139-143: the controls go through the `UiWidgets` factory (GUI-139/140), the rows use
+the aligned grid (GUI-141), the Low-processor checkbox disables its sleep child like GUI-142's
+master toggles, and the rail entry joins GUI-143's icon map. Do not work this row before those land.
+The rows are `PerfPresetOpt` (Quality / Balanced / Memory saver / Custom), `RendererOpt` with
+`RendererRunningLabel`/`RendererPendingLabel`, `GraphMsaaOpt` (Off/2×/4×/8×), `GraphScaleOpt`
+(100/75/50 %), `GlowCb`, `FogCb`, the `FpsOpt` moved from System, `VsyncOpt` (On/Adaptive/Off),
+`LowProcessorCb` and `LowProcessorSleepSpin` (1-20 ms, value = µs/1000, disabled when the box is
+off). The running line reuses `RendererInfo.about_text()`; the About tab's
+`godot/scenes/ui/settings_panel.gd:1775` line remains the independent record.
+
+**Store.** `godot/scenes/autoloads/settings_manager.gd` gains `cfg_renderer` (validated against
+`forward_plus`/`mobile`/`gl_compatibility`, unknown falls back), `cfg_graph_msaa` (0-3 =
+Off/2×/4×/8×, default 1), `cfg_graph_scale` (50/75/100, default 100), `cfg_graph_glow` and
+`cfg_graph_fog` (both true), `cfg_low_processor` (false), `cfg_low_processor_sleep_usec` (clamped
+1000-20000, default 6900) and `cfg_vsync` (`VSYNC_ENABLED`/`ADAPTIVE`/`DISABLED`, default ENABLED).
+Each gets the `_as_*` read and the `_save_settings_file` write; the frame cap keeps its existing key
+and only its control moves. `PERF_PRESETS` is the one table, and `active_perf_preset()` compares the
+stored values against it on every settings change; `custom` when none matches. No preset is stored,
+so an edited row cannot leave a preset label lying.
+
+`RENDERER_DEFAULT` is `forward_plus`, and a test asserts it equals `godot/project.godot`'s
+`renderer/rendering_method`; a release that changes the default also migrates the stored value (the
+override writer's remove-on-default rule follows the constant). `RENDERER_LABELS` and
+`PERF_PRESET_LABELS` map ids to display names; the store and the override file keep the ids. On
+Compatibility, `VSYNC_ADAPTIVE` is unavailable in Godot 4.7's renderer matrix: `VsyncOpt` disables
+it with that reason and applies On while preserving the stored value. Under the headless display
+server `_apply_performance_settings` records the requested mode in an `_applied_vsync` seam instead
+of calling `window_set_vsync_mode`, so the GUT test does not need a display. `cfg_low_processor`
+defaults false because that is today's project default; GUI-147 owns the flip to true, and its row
+must update this default and the Quality preset in the same change.
+
+| Row | Quality | Balanced | Memory saver |
+|---|---|---|---|
+| Renderer | Forward+ | Forward+ | Compatibility |
+| Graph MSAA | 2× | Off | Off |
+| Graph scale | 100 % | 100 % | 75 % |
+| Glow | on | on | off |
+| Fog | on | off | off |
+| Low processor | off | on | on |
+
+Frame cap and V-Sync stay user choices, as the game-menu grammar keeps the display preferences out
+of the quality preset.
+
+**Renderer, on restart.** `godot/project.godot` gains
+`application/config/project_settings_override="user://override.cfg"`; SettingsManager's
+`_write_renderer_override()` serializes the two-line `[rendering]` section and writes it through
+`_write_text` (the store's atomic temp+rename, 0600), never `ConfigFile.save` directly: a truncated
+startup file is read before any script can repair it. It removes the file when the value is the
+project default, so an untouched install pins nothing. It is called from `save_settings()` and once
+from `_on_init()` after `load_settings()` (never from `_save_settings_file`, which sidebar folds
+use). All three values keep the existing Windows fallback chain and the macOS/Linux paths. The row
+is honest about the running state: `cfg_renderer !=
+RenderingServer.get_current_rendering_method()` shows "Restart to apply"; if the engine falls back
+again after a restart, the label says "Requested X; this machine runs Y" rather than repeating the
+instruction forever. On a software rasterizer (`RendererInfo.is_software`) the running line carries
+the existing warning and the tooltip points at Compatibility; the menu does not auto-switch. The
+tooltip carries the three measured costs and the bloom/MSAA losses. Glow is
+disabled while `RendererInfo.supports_glow()` is false; the gate at
+`godot/scenes/ui/vault_graph_3d.gd:483` stays the single source of truth. The reflection and shadow
+atlas rows are deliberately absent: Godot 4.7 allocates the reflection atlas only when a
+`ReflectionProbe` first renders and the shadow atlases only when a shadow-casting light first
+renders; gPTY has no probe and its only light disables shadows
+(`godot/scenes/ui/vault_graph_3d.gd:406`), so those rows would change nothing. They return with a 3D
+surface that uses them, measured first.
+
+**Live apply.** `Workspace._on_settings_changed()` and `_ready` call
+`_apply_performance_settings()`: `OS.low_processor_usage_mode`, its `_sleep_usec`, and
+`DisplayServer.window_set_vsync_mode(cfg_vsync)` unless `--disable-vsync` is on the command line
+(the bench flag keeps winning; `VsyncOpt` is disabled with that reason), then the existing
+`_apply_fps_setting()` at `godot/scenes/terminal/workspace.gd:451`. `VaultGraph3D._ensure_scene`
+maps `cfg_graph_msaa` to the `Viewport.MSAA_*` constants and sets
+`_viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR` plus
+`_viewport.scaling_3d_scale = cfg_graph_scale / 100.0`; the overlay stays full-resolution, only the
+3D buffer scales. `_apply_style` gates glow on `cfg_graph_glow` and sets
+`env.fog_enabled = cfg_graph_fog` (today `godot/scenes/ui/vault_graph_3d.gd:446` is unconditional).
+The view connects `SettingsManager.settings_changed` to its apply method so a live change reaches an
+open graph without a rebuild; the method sets MSAA/scale and calls `_apply_style()` for glow/fog,
+and is safe before `_ensure_scene` (the style is stored).
+
+**Panel and edges.** The panel calls `_sync_performance_rows()` in `NOTIFICATION_VISIBILITY_CHANGED`
+and after the debounce/control writes, like `_sync_motion_rows`, so an externally changed setting or
+a pending renderer is current when the section opens. `RendererRunningLabel` autowraps
+(`TextServer.AUTOWRAP_WORD_SMART`) so a long adapter name does not widen the card, and the controls
+go through `UiWidgets` so GUI-140's gate covers them. The low-processor sleep hint names TERM-23's
+input-latency gate; the switch is the user-facing half of GUI-147, which owns the loop and the
+project default. The full frame/time/memory/power readout is GUI-146; this section only names the
+running renderer and the pending state.
+
+**Frame cap move.** The System section drops `_add_fps_control` and its reset lines; Performance
+gains both. `test_settings_panel.gd:123` (`test_system_reset_restores_system_settings`) loses the
+max-fps assertion, and a Performance reset test asserts it. The row lands after GUI-188, which owns
+the pane `max_fps` precedence; this is the global row only.
+
+**Tests and gates.** New `godot/tests/unit/test_settings_performance.gd` covers preset computation,
+renderer validation and the override write/remove, the pending label, the reset, and the
+low-processor apply. `godot/tests/integration/test_vault_graph_3d.gd` asserts the viewport's MSAA,
+scale, glow and fog follow the settings. `test_workspace_settings.gd` asserts the OS flags and vsync
+(restoring the globals in teardown). `test_settings_panel.gd` asserts the section exists and the FPS
+row moved. `godot/tests/bench/ui_capture.gd` gains a `settings-performance` state
+(`tab: "Performance"`, `scroll_to` a lower row) plus a `settings-performance-150` state at 150 % UI
+scale (the pending label must wrap, not widen the card), the existing System state is recaptured
+because the FPS row moved, and `scripts/ui-capture-check` proves both Performance captures repeat.
+`scripts/smoke_pane_api.py` gains a renderer-override launch (seed `user://override.cfg`, launch,
+parse the `[renderer]` line) and joins the Linux and Windows renderer-smoke steps, so the startup
+file is proven by a real launch, not only by the unit test. BUILD-149 owns the numbers in the hints;
+BUILD-72 owns the budget table. `README.md` and `docs/content/docs/agents/testing.md` stop calling
+`--rendering-driver opengl3` the
+only opt-in; the Settings row is the documented one, the flags remain the launch override. Acceptance
+is `./scripts/gut-check`, `./scripts/ui-capture` + `./scripts/ui-capture-check`, `./scripts/ci-check`,
+`python3 scripts/docs-check` and `./scripts/build-docs --check`, plus a manual launch that shows the
+section, changes the live graph, and survives a renderer restart.
+
+Screenshot: *The Performance section: preset, renderer, graph quality and power rows* ([captures](../screenshots/v0.8.md#screenshots)).
+
+## GUI-190
+
+**A restart applies pending startup settings in place** - found 2026-11-28 while planning GUI-189.
+The Performance section labels renderer changes "Restart to apply"; a game menu offers Later and
+Restart now at that point, and gPTY should too. The obvious implementation - `OS.create_process`
+followed by `get_tree().quit()` - races the single-instance socket: the IPC server refuses a second
+GUI while the first listens (`crates/gpty-ipc/src/server.rs:417`, `SocketState::Live`), so a fast
+child can refuse the live name and exit, leaving no GUI at all.
+
+The design: a `RestartBtn` shown only while a startup setting is pending. On press,
+`save_settings()` writes the override file and the workspace's `_exit_tree`
+(`godot/scenes/terminal/workspace.gd:516`) saves the workspace store, then a detached relaunch
+starts after the old process exits. Unix and macOS use `/bin/sh -c 'sleep 1; exec "$0"' <exe>`;
+Windows uses `cmd.exe` with a one-second delay and a quoted `start`. The new instance reads
+`user://override.cfg` and needs no renderer argument. The confirmation names what the restart costs:
+every pane's shell is closed; the layout restores, the processes do not. A running command, an
+unsaved editor buffer or an agent turn is lost, so Restart now is not the default. If a platform's
+detached spawn proves unreliable, add a bounded socket-bind retry behind a private `--gpty-restart`
+argument, never by
+weakening the live-socket refusal: the refusal is what keeps two listeners from orphaning each
+other.
+
+Acceptance: a relaunch on Linux under X11 and Wayland, the Windows `windows` job smoke, and a manual
+macOS launch; the panes restore; no orphaned second listener exists; and the new process's
+`[renderer]` startup line names the chosen method. Depends on GUI-189. No `Commits:` line until the
+work lands.
