@@ -457,7 +457,9 @@ privilege is present while project code runs:
   fonts and colour schemes the export compiles into `gpty-gui.pck`, then runs
   `scripts/bundle-sbom` over that tree: `gpty-<version>.spdx.json` names the
   bundle's components (gPTY, Godot, FFmpeg, DejaVu Sans Mono, Phosphor Icons,
-  the colour schemes) and digests every shipped file. The SBOM is a line in
+  the colour schemes, and one package per compiled crate - 145 today, from a
+  `cargo tree` over the four shipped targets with the dev and optional edges
+  removed) and digests every shipped file. The SBOM is a line in
   `SHA256SUMS` and ships in the same artifact.
 
   `workflow_dispatch` on that file is how the caches are filled and how the
@@ -593,8 +595,12 @@ not meet this floor; the first release after the fix is the proof.
 Releases published before the bundle asset existed carry attestations only in
 the API, so Scorecard's provenance probe sees nothing for them (it scores the
 five most recent releases, and only assets count). The bundles are still
-retrievable; one operator run over the last four stable tags lifts the score
-from 2 (one release with a bundle) to 10:
+retrievable; one operator run over the last four stable tags takes the check
+from 0 to 10. On the overall score that is +0.77 - Signed-Releases is a
+High-risk check at weight 7.5 of 97.5, so 10/10 contributes 0.769 - which moves
+the current 8.7 to about 9.5; a single release carrying the bundle scores the
+check 2 and is +0.15. Do not reuse the numbers in the BUILD-82 row text: they
+were derived when the repository scored 7.8.
 
 ```bash
 for tag in v0.8.5 v0.8.4 v0.8.3 v0.8.2; do

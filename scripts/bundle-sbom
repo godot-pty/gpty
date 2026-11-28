@@ -3,7 +3,15 @@
 
 Usage:
     scripts/bundle-sbom --self-test
-    scripts/bundle-sbom <stage-dir> <version> <output.spdx.json>
+    scripts/bundle-sbom <stage-dir> <version> <output.spdx.json> [--crates FILE]
+
+`--crates` is the release job's `cargo tree` dump: one `name vVERSION|LICENSE`
+line per compiled crate, gathered per shipped target with the dev and optional
+edges gone. That is the set the binaries were compiled from - the same set
+`cargo auditable` embeds in them - read from the pinned lockfile instead of from
+the executable, so a release needs no special build and this script parses no
+ELF, PE or Mach-O container. Workspace crates are skipped: they are the `gpty`
+package, not dependencies of it.
 
 <stage-dir> is the tree the release job assembles:
 
@@ -85,17 +93,23 @@ def slug(text: str) -> str:
 
 
 def package(
-    name: str, version: str, license_id: str, purl: str, analyzed: bool = False
+    name: str,
+    version: str,
+    license_id: str,
+    purl: str,
+    analyzed: bool = False,
+    concluded: str | None = None,
+    spdx_id: str | None = None,
 ) -> dict:
     return {
         "name": name,
-        "SPDXID": f"SPDXRef-Package-{slug(name)}",
+        "SPDXID": spdx_id or f"SPDXRef-Package-{slug(name)}",
         "versionInfo": version,
         "downloadLocation": "NOASSERTION",
         # Only gpty's own package lists the files; SPDX 2.3 rejects `hasFiles`
         # on a package whose files were not analyzed.
         "filesAnalyzed": analyzed,
-        "licenseConcluded": license_id,
+        "licenseConcluded": concluded or license_id,
         "licenseDeclared": license_id,
         "copyrightText": "NOASSERTION",
         "externalRefs": [
@@ -119,6 +133,78 @@ def embedded_component(relative: str) -> str | None:
     return max(matches, key=len) if matches else ""
 
 
+CRATE_LINE = re.compile(
+    r"^(?P<name>[A-Za-z0-9_-]+) v(?P<version>[^\s|]+)(?: \([^)]*\))?\|(?P<license>.*)$"
+)
+SPDX_TOKEN = re.compile(r"^[A-Za-z0-9.+-]+$")
+SPDX_OPERATORS = {"AND", "OR", "WITH"}
+
+
+def spdx_expression(raw: str) -> str:
+    """A crate's declared licence as an SPDX expression, or `NOASSERTION`.
+
+    Older crates spell the disjunction with slashes (`Apache-2.0/MIT`), which is
+    not an SPDX expression; that is normalised. Anything else this cannot read
+    safely is downgraded rather than failing a release over a dependency's own
+    manifest - a consumer parses the document, so it must stay valid.
+    """
+    text = raw.strip()
+    if not text:
+        return "NOASSERTION"
+    text = re.sub(r"\s*/\s*", " OR ", text)
+    tokens = text.replace("(", " ").replace(")", " ").split()
+    if not tokens or not all(
+        token in SPDX_OPERATORS or SPDX_TOKEN.match(token) for token in tokens
+    ):
+        return "NOASSERTION"
+    if tokens[0] in SPDX_OPERATORS or tokens[-1] in SPDX_OPERATORS:
+        return "NOASSERTION"
+    return text
+
+
+def crate_packages(path: Path) -> list[dict]:
+    """One package per compiled crate, from the release job's `cargo tree` dump.
+
+    The manifest's licence expression is what `cargo tree --format '{l}'` prints;
+    it is the crate's own declaration, so it is `licenseDeclared` and the
+    conclusion is `NOASSERTION` - this script did not scan the crate.
+    """
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        fail(f"cannot read the crate inventory {path}: {error}")
+    seen: dict[tuple[str, str], str] = {}
+    for raw in lines:
+        line = raw.strip().removesuffix(" (*)")
+        if not line:
+            continue
+        match = CRATE_LINE.match(line)
+        if not match:
+            fail(f"unreadable crate inventory line: {raw!r}")
+        name, version = match["name"], match["version"]
+        # The workspace's own crates are the `gpty` package above; one package
+        # per crate would say the same thing seven more times.
+        if name.startswith("gpty"):
+            continue
+        declared = spdx_expression(match["license"])
+        if declared == "NOASSERTION" and match["license"].strip():
+            print(f"bundle-sbom: {name} {version}: unreadable licence {match['license'].strip()!r},\x20declared as NOASSERTION", file=sys.stderr)
+        seen[(name, version)] = declared
+    if not seen:
+        fail(f"no crates in {path}")
+    return [
+        package(
+            name,
+            version,
+            license_id,
+            f"pkg:cargo/{name}@{version}",
+            concluded="NOASSERTION",
+            spdx_id=f"SPDXRef-Package-cargo-{slug(name)}-{slug(version)}",
+        )
+        for (name, version), license_id in sorted(seen.items())
+    ]
+
+
 def license_for(relative: str) -> str:
     owner = embedded_component(relative)
     if owner:
@@ -137,7 +223,7 @@ def digests(path: Path) -> tuple[str, str]:
     return sha1.hexdigest(), sha256.hexdigest()
 
 
-def build(stage: Path, version: str) -> dict:
+def build(stage: Path, version: str, crates: Path | None = None) -> dict:
     if not stage.is_dir():
         fail(f"no such stage directory: {stage}")
     payload = stage / "payload"
@@ -208,6 +294,8 @@ def build(stage: Path, version: str) -> dict:
     for repo_path in sorted(staged):
         name, license_id = EMBEDDED[repo_path]
         packages.append(package(name, "NOASSERTION", license_id, f"pkg:generic/{slug(name)}"))
+    if crates is not None:
+        packages.extend(crate_packages(crates))
     packages[0]["hasFiles"] = [entry["SPDXID"] for entry in files]
     packages[0]["downloadLocation"] = f"https://github.com/godot-pty/gpty/releases/tag/{version}"
 
@@ -301,6 +389,39 @@ def self_test() -> None:
         if again["documentNamespace"] == document["documentNamespace"]:
             fail("self-test: the namespace did not change with the content")
 
+        # The crate inventory: a third-party crate becomes a package with the
+        # manifest's expression, and the workspace's own crates are skipped.
+        inventory = work / "crates.txt"
+        inventory.write_text(
+            "serde v1.0.0|MIT OR Apache-2.0\n"
+            "serde v1.0.0|MIT OR Apache-2.0 (*)\n"
+            "old-crate v0.2.0|Apache-2.0/MIT\n"
+            "bitflags v1.3.2|MIT OR Apache-2.0\n"
+            "bitflags v2.6.0|MIT OR Apache-2.0\n"
+            "broken v0.3.0|not a licence!\n"
+            "gpty-core v0.0.0 (/repo/crates/gpty-core)|GPL-3.0-or-later\n",
+            encoding="utf-8",
+        )
+        with_crates = build(work, "v0.0.0", inventory)
+        by_name = {spec["name"]: spec for spec in with_crates["packages"]}
+        if "serde" not in by_name:
+            fail("self-test: the crate inventory did not reach the document")
+        if by_name["serde"]["externalRefs"][0]["referenceLocator"] != "pkg:cargo/serde@1.0.0":
+            fail("self-test: the crate purl is wrong")
+        if by_name["serde"]["licenseConcluded"] != "NOASSERTION":
+            fail("self-test: a crate's unverified licence was concluded")
+        if "gpty-core" in by_name:
+            fail("self-test: a workspace crate was listed as a dependency")
+        if by_name["old-crate"]["licenseDeclared"] != "Apache-2.0 OR MIT":
+            fail("self-test: the legacy slash licence was not normalised")
+        if by_name["broken"]["licenseDeclared"] != "NOASSERTION":
+            fail("self-test: an unparseable licence was published verbatim")
+        # One crate can ship at two versions (bitflags does); a name-only SPDXID
+        # would make the document invalid.
+        ids = [spec["SPDXID"] for spec in with_crates["packages"]]
+        if len(ids) != len(set(ids)):
+            fail("self-test: two packages share an SPDX id")
+
         # An unlabelled embedded path must be refused, not published.
         (work / "embedded" / "godot" / "mystery").mkdir()
         (work / "embedded" / "godot" / "mystery" / "x.bin").write_bytes(b"x")
@@ -319,10 +440,22 @@ def main(argv: list[str]) -> int:
     if argv == ["--self-test"]:
         self_test()
         return 0
-    if len(argv) != 3:
-        fail("usage: bundle-sbom <stage-dir> <version> <output.spdx.json> | --self-test")
-    stage, version, output = Path(argv[0]), argv[1], Path(argv[2])
-    document = build(stage, version)
+    rest = list(argv)
+    crates = None
+    if "--crates" in rest:
+        index = rest.index("--crates")
+        try:
+            crates = Path(rest[index + 1])
+        except IndexError:
+            fail("--crates needs a file")
+        del rest[index : index + 2]
+    if len(rest) != 3:
+        fail(
+            "usage: bundle-sbom <stage-dir> <version> <output.spdx.json> "
+            "[--crates FILE] | --self-test"
+        )
+    stage, version, output = Path(rest[0]), rest[1], Path(rest[2])
+    document = build(stage, version, crates)
     output.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     print(
         f"bundle-sbom: wrote {output} "
