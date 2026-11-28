@@ -2981,13 +2981,15 @@ Commits: 2874b45, e8b8937
 
 ## BUILD-145
 
-**The ledger CLI cannot record and close in one call, and `show` piped to `head` reports a broken pipe** - found
-2026-11-27: the session wrote four record+close pairs (two commands each) and `./scripts/roadmap
-show <ID> | head` printed `roadmap: [Errno 32] Broken pipe`, because `main()` catches
-`BrokenPipeError` as an `OSError` and reports a reader that closed the pipe as an error. Fix:
-`roadmap close <ID> --record FILE` validates the body (the title must equal the index row, a
-`Commits:` line is refused) and writes it before closing, sharing the record body loader; a
-`BrokenPipeError` handler redirects stdout to devnull and exits 0. Tests: `roadmap selftest` covers
-a bad-title `--record` (row stays open), a recorded body with `Commits: unrecorded`, and a 100 KB
-`show` whose reader closes after one line (exit 0, no `Broken pipe`). Docs: the roadmap guide and
-skill name the one-call form.
+**The ledger CLI cannot record and close in one call, and `show` piped to `head` reports a broken pipe** - `roadmap
+close <ID> --record FILE` validates the body (the title must match the index row, a `Commits:` line
+is refused) and writes it before closing, using the same loader as `record`; `roadmap show` now
+flushes inside its `BrokenPipeError` handler and exits 0 via `os._exit`, so a reader that closes the
+pipe is a normal end instead of `roadmap: [Errno 32] Broken pipe`. `roadmap selftest` covers a
+mismatched title (the row stays open), a recorded body with `Commits: unrecorded`, and a 100 KB
+`show` whose reader closes after one line (exit 0, no error); the roadmap guide and skill name the
+one-call form. Verified with `python3 -m py_compile scripts/roadmap`, `./scripts/roadmap selftest`,
+`./scripts/ci-check --only docs`, the manual `show BUILD-141 | head -3` (exit 0, no error),
+`docs-check` and `roadmap audit`.
+
+Commits: aaf3d22

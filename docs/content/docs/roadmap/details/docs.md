@@ -746,11 +746,12 @@ fixture with a title-only caption (fails) and an ID-cited caption (passes).
 ## DOCS-58
 
 **The handoff and wiki-bundle guidance still invites pasted prose and a stale-bundle gate run** - the
-2026-11-27 session's plan was 25.5 KB and the approval inlined it again, largely because it carried
-record and commit prose an implementer could read in the repo; separately the first `tooling-smoke`
-run failed on the knowledge bundle because the bundle was built after the smoke, and the handoff
-guide says "never code bodies" but not "never prose bodies". Fix: the handoff text names paths, edge
-cases, commands and acceptance and forbids code or prose bodies; `testing.md` and
-`skill://gpty-wiki` state that a wiki/docs edit rebuilds the bundle before the smoke/docs gate; the
-roadmap gate table names the wiki build. Tests: the docs gates (`docs-check`, `build-docs --check`,
-`build-wiki --check`) and a read of the three diffs.
+roadmap guide's `Handoff` and the roadmap skill now say a plan names signatures, paths, edge cases,
+exact commands and acceptance, never code or prose bodies; `testing.md` and the wiki skill state
+that a wiki/docs edit rebuilds its bundle before the tooling smoke/docs gate, and the roadmap gate
+table names `build-wiki` and `godot/knowledge.json` for a wiki edit. The session's 25.5 KB plan
+(inlined again at approval) and its first smoke run failing on the stale knowledge bundle are the
+evidence. Verified with `python3 scripts/docs-check`, `./scripts/build-docs --check`,
+`./scripts/roadmap audit` and `./scripts/ci-check --only docs`.
+
+Commits: aaf3d22, 6a49564
