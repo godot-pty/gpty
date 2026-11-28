@@ -27,7 +27,7 @@ The vault at `docs/content/wiki` is the knowledge base the app ships: a plain Ma
 ## Ship it
 
 1. `./scripts/build-wiki` rewrites the tracked `godot/knowledge.json` and prints the note count and version hash.
-2. `./scripts/build-wiki --check` is the CI gate: it fails on a stale bundle.
+2. `./scripts/build-wiki --check` is the CI gate: it fails on a stale bundle. Run the bundle and this check before `./scripts/tooling-smoke`/the docs gate; the smoke re-runs the bundle checks.
 3. `./scripts/docs-check` lints the docs tree (Markdown, roadmap tables, split pages).
 4. Optional live proof: launch a headless GUI in a temp sandbox (`GPTY_SOCKET`, `GPTY_TEST_USER_DIR`, `XDG_*` pointed there), run `gpty profile load "Knowledge Base"`, then read `knowledge/<version>/<note path>` under that temp dir — the bundle is seeded on first use.
 5. `./scripts/ci-check` runs the bundle gate among everything else; `--fast` does not.

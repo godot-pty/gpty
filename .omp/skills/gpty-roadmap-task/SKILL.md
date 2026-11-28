@@ -17,7 +17,7 @@ The roadmap is an index plus per-area evidence pages:
 - **Rows go stale.** They are written on one build and implemented days later: reproduce the claim on the current build before writing code, and re-locate any `file:line` (numbers drift). The fidelity probe pass found rows already fixed, half-fixed, and describing code that had moved.
 - Already fixed? Close it with the evidence. Narrowed? Rewrite the detail section to what remains. Obsolete or superseded? Mark it `🚫` and say why in the detail; declined by decision? Mark it `❌` and say why. Never leave a dead row open and never delete it. Never add a "corrections" row.
 
-**Handing a row to another agent:** the plan names signatures, edge cases, exact commands and the acceptance check - never code bodies; the reader has the repository, and a pasted sketch goes stale.
+**Handing a row to another agent:** the plan names signatures, paths, edge cases, exact commands and the acceptance check - never code or prose bodies; the reader has the repository, and a pasted body goes stale.
 
 ## 2. Read the guides the area touches
 
@@ -43,7 +43,7 @@ A fix without a failing-before observation is a guess. Reproduce on a fresh buil
 | `#[func]` exports | `./scripts/check-ffi-surface` — a renamed export fails only at runtime, in whichever pane calls it, often only in a log line |
 | GDScript palette or widget colour | `./scripts/check-theme-tokens` — a class-body `UiPalette.active()` read or an `add_theme_color_override` pins the mode a widget was built under; `# theme-ok: <why>` is the reviewed exception |
 | IPC method / MCP tool | `cargo test -p gpty` — the package is `gpty`; there is no `gpty-cli` package. `mcp.rs` reads the real registrations, the GDScript dispatch arms and every CLI call literal, and `wire.rs` checks translated argument keys against the handler's own |
-| any doc/roadmap edit | `python3 scripts/docs-check`; when the edited page is one the documentation bundle carries (everything reachable from `README.md` - the root guides and the `docs/content/docs/{roadmap,changelog,agents}` pages), also `./scripts/build-docs` so `godot/docs.json` is not stale (`--check` names it) |
+| any doc/roadmap edit | `python3 scripts/docs-check`; when the edited page is one the documentation bundle carries (everything reachable from `README.md` - the root guides and the `docs/content/docs/{roadmap,changelog,agents}` pages), also `./scripts/build-docs` so `godot/docs.json` is not stale (`--check` names it); a `docs/content/wiki/**` edit runs `build-wiki` and commits `godot/knowledge.json` |
 | closing a row | `./scripts/roadmap close <ID>` — it flips the index and writes the `Commits:` line from `Roadmap: <ID>` trailers; `python3 scripts/docs-check` proves the index/detail agreement |
 | `docs/data/capabilities/**`, `scripts/check-capabilities`, `scripts/render-capabilities` | `./scripts/check-capabilities` — id grammar, status vocabulary, evidence paths at HEAD, `row` naming a roadmap ID, no URLs; the docs gates in `ci-check` and the `Docs` workflow run it, and the renderer is compiled there too |
 | app-visible behavior | `python3 scripts/smoke_pane_api.py`, or `skill://gpty-live-gui-smoke`; UI claims → `skill://gpty-ui-review` (`scripts/ui-capture` stages a state; `scripts/ui-capture-check` proves the captures repeat, and needs a display) |
@@ -54,7 +54,7 @@ A missing toolchain SKIPs locally but FAILS under `CI`/`GITHUB_ACTIONS`, so a lo
 
 ## 6. Close the row
 
-- Rewrite the **detail section** as the record: what shipped, measured numbers (not adjectives), the tests by name, the failure mode now closed. A reader must be able to tell whether it is done without opening the commit. `./scripts/roadmap record <ID> --body-file FILE` writes it (wrapped, and the index row's title must match), `--append` adds a paragraph.
+- Rewrite the **detail section** as the record: what shipped, measured numbers (not adjectives), the tests by name, the failure mode now closed. A reader must be able to tell whether it is done without opening the commit. `./scripts/roadmap record <ID> --body-file FILE` writes it (wrapped, and the index row's title must match), `--append` adds a paragraph; `./scripts/roadmap close <ID> --record FILE` writes the body and closes in one call (the title must match too).
 - `./scripts/roadmap close <ID>` flips `⬜`→`✅` in the index and writes the oldest-first `Commits:` list. If it reports no commit, put `Roadmap: <ID>` in the fix commit's body and retry; `--force` writes `unrecorded` and is only for work with no attributable commit.
 - Closing a bug row means the fix commit declares its `Cause:` class (`docs/content/docs/agents/defect-classes.md`). If that class now has a third member and no mechanical control, add the control's roadmap row now - the class page's review loop owns the threshold.
 - Corrections fold into that row's detail.

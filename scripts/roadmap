@@ -443,6 +443,8 @@ def cmd_close(args):
         die(f'{row.id} is {roadmap_lib.STATUS[row.status]}; close requires an open row')
     detail_page, sec = ledger.section(row)
     title, _ = title_body(sec, rel(detail_page.path))
+    if args.record:
+        sec.body = recorded_body(args.record, row)
     hashes = commits_for(row)
     if not hashes and not args.force:
         die(f'no commit names {row.id}; add a `Roadmap: {row.id}` trailer '
@@ -584,22 +586,31 @@ def cmd_move(args):
     print(f'moved {row.id}: {src_page.name} -> {target.name} ({holder})')
 
 
+def recorded_body(body_file, row):
+    """The wrapped body from a file whose title must match the index row."""
+    raw = read(body_file).strip('\n')
+    for line in raw.split('\n'):
+        if roadmap_lib.COMMIT_LINE.match(line):
+            die(f'{body_file}: a body file cannot carry the Commits: line; close owns it')
+    title, _ = title_body(Section('new', raw), body_file)
+    if title != row.title:
+        die(f'{row.id}: the body names "{title}", the index row is "{row.title}"')
+    return roadmap_lib.wrap(raw)
+
+
 def cmd_record(args):
     ledger = Ledger()
     row = ledger.row(args.id)
     detail, sec = ledger.section(row)
-    raw = read(args.body_file).strip('\n')
-    for line in raw.split('\n'):
-        if roadmap_lib.COMMIT_LINE.match(line):
-            die(f'{args.body_file}: a body file cannot carry the Commits: line; close owns it')
     old = sec.clean()
     if args.append:
+        raw = read(args.body_file).strip('\n')
+        for line in raw.split('\n'):
+            if roadmap_lib.COMMIT_LINE.match(line):
+                die(f'{args.body_file}: a body file cannot carry the Commits: line; close owns it')
         new = f'{old}\n\n{roadmap_lib.wrap(raw)}'
     else:
-        title, _ = title_body(Section('new', raw), args.body_file)
-        if title != row.title:
-            die(f'{row.id}: the body names "{title}", the index row is "{row.title}"')
-        new = roadmap_lib.wrap(raw)
+        new = recorded_body(args.body_file, row)
     commits = sec.commits()
     if args.dry_run:
         print(f'would record {row.id}:\n\n## {row.id}\n\n{new}')
@@ -894,8 +905,17 @@ def cmd_selftest(args):
         if joined['capabilities'][0]['row'] != 'OTHER-1':
             die('selftest: rearea did not rewrite the capability row')
         expect(child(root, 'next-id', 'OTHER'), 0, 'OTHER-2', 'next-id sees the move')
-        expect(child(root, 'close', 'OTHER-1', '--force'), 0, 'OTHER-1',
-               'the moved row closes')
+        bad = os.path.join(root, 'bad-close.md')
+        write(bad, '**Wrong title** - x\n')
+        expect(child(root, 'close', 'OTHER-1', '--force', '--record', bad), 1,
+               'the body names', 'close --record refuses a mismatched title')
+        body = os.path.join(root, 'close-record.md')
+        write(body, '**Second fixture row** - recorded body.\n')
+        expect(child(root, 'close', 'OTHER-1', '--force', '--record', body), 0,
+               'closed OTHER-1', 'close --record writes the body and closes')
+        other = read(os.path.join(root, 'docs/content/docs/roadmap/details/other.md'))
+        if 'recorded body.' not in other or 'Commits: unrecorded' not in other:
+            die('selftest: close --record did not write the body and Commits line')
         expect(child(root, 'release-check', 'v0.0.0'), 0, 'all closed',
                'release-check passes with both rows closed')
         expect(child(root, 'next'), 1, 'no open row', 'next ends when the queue is empty')
@@ -1028,8 +1048,25 @@ def cmd_selftest(args):
                'the repaired count passes the audit')
         expect(child(stale, 'stats', '--write'), 0, 'already current',
                'stats --write is idempotent')
-    print('selftest: ok (fixture: next/show/close/rearea/add/move/record/stats/'
-          'release-check/audit/json/dry-run)')
+
+        pipe_root = os.path.join(root, 'pipe')
+        fixture(pipe_root)
+        pipe_detail = os.path.join(pipe_root, 'docs/content/docs/roadmap/details/test.md')
+        write(pipe_detail, read(pipe_detail).replace(
+            '**First fixture row** - first body.',
+            '**First fixture row** - first body. ' + 'x' * 100_000, 1))
+        proc = subprocess.Popen(
+            [sys.executable, os.path.join(REPO, 'scripts', 'roadmap'), 'show', 'TEST-1'],
+            env=dict(os.environ, ROADMAP_ROOT=pipe_root),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc.stdout.readline()
+        proc.stdout.close()
+        proc.wait(timeout=10)
+        err = proc.stderr.read()
+        if proc.returncode != 0 or 'Broken pipe' in err or 'roadmap:' in err:
+            die(f'selftest: show with a closed pipe exited {proc.returncode}: {err.strip()}')
+    print('selftest: ok (fixture: next/show/close/close-record/rearea/add/move/record/'
+          'stats/release-check/audit/json/dry-run/pipe)')
 
 
 def positive_int(text):
@@ -1079,6 +1116,7 @@ def main():
     p.set_defaults(func=cmd_record)
     p = sub.add_parser('close', help='mark a row done and record its commits')
     p.add_argument('id', metavar='ID')
+    p.add_argument('--record', metavar='FILE')
     p.add_argument('--force', action='store_true')
     p.add_argument('--dry-run', action='store_true')
     p.set_defaults(func=cmd_close)
@@ -1108,9 +1146,21 @@ def main():
     args = ap.parse_args()
     try:
         args.func(args)
+        # Flush inside the try: a reader that closed the pipe raises here, not
+        # in the interpreter's shutdown flush (where it would only warn and
+        # exit 120).
+        sys.stdout.flush()
     except UserError as exc:
         print(f'roadmap: {exc}', file=sys.stderr)
         sys.exit(1)
+    except BrokenPipeError:
+        # A reader (head, less) closed the pipe: that is a normal end, not an error.
+        # os._exit skips the interpreter's stdout flush, which would raise the same
+        # error again when the pipe is gone.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
+        os._exit(0)
     except (OSError, ValueError) as exc:
         print(f'roadmap: {exc}', file=sys.stderr)
         sys.exit(1)

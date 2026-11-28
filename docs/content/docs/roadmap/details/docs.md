@@ -742,3 +742,16 @@ failure mode: it needed a manual edit to name GUI-78. Fix: a `docs-check` rule o
 exactly an index title must be prefixed `AREA-N · `, and every `AREA-N · ` must name a row; the
 `Resize drag`/`First launch` style (an ID plus prose) passes. Tests: extend the docs-check evidence
 fixture with a title-only caption (fails) and an ID-cited caption (passes).
+
+## DOCS-58
+
+**The handoff and wiki-bundle guidance still invites pasted prose and a stale-bundle gate run** - the
+roadmap guide's `Handoff` and the roadmap skill now say a plan names signatures, paths, edge cases,
+exact commands and acceptance, never code or prose bodies; `testing.md` and the wiki skill state
+that a wiki/docs edit rebuilds its bundle before the tooling smoke/docs gate, and the roadmap gate
+table names `build-wiki` and `godot/knowledge.json` for a wiki edit. The session's 25.5 KB plan
+(inlined again at approval) and its first smoke run failing on the stale knowledge bundle are the
+evidence. Verified with `python3 scripts/docs-check`, `./scripts/build-docs --check`,
+`./scripts/roadmap audit` and `./scripts/ci-check --only docs`.
+
+Commits: aaf3d22, 6a49564
