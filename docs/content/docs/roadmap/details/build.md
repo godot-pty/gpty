@@ -2929,10 +2929,12 @@ outcome, never a selection input: `--stamped` with no matching stamp classifies 
 (`CI_CHECK_RANGE_FROM`) exactly like a hand run, selects the docs/tooling/code class, and writes the
 stamp when that run passes on a clean tree. `--classify` prints the selected step ids.
 
-Measured on the branch's first, docs-only commit: `CI_CHECK_RANGE_FROM=HEAD^ ./scripts/ci-check
---stamped --summary` ran `workflows docs capabilities secrets cost` in 5 s with no
-`tests`/`gut`/`smoke` log, against the 242 s the same first push cost before. The temp-repository
-fixture asserts a docs range excludes `tests`/`gut`/`smoke` and a code range keeps them.
+Measured on one docs-only working tree with the same caches, `CI_CHECK_FULL=1` as the control: the
+classified run took 5.4 s for `workflows docs capabilities secrets cost`; the forced full suite on
+the same tree took 242.8 s. The step set, not the machine, is the difference, and the full-suite arm
+matches the row's original 242 s first-push observation (when the class did not apply). The
+temp-repository fixture asserts a docs range excludes `tests`/`gut`/`smoke` and a code range keeps
+them.
 
 Commits: e109329, 10ee851, 59dfac4
 
@@ -2941,13 +2943,16 @@ Commits: e109329, 10ee851, 59dfac4
 **A docs-only PR still pays the full matrix in the merge queue** - the `changes` job's classifier is
 now `scripts/ci-changes`, which prints the four bits for the event's `BASE..HEAD`; the merge-group
 branch that forced every bit true is gone, so a group classifies its own diff (`base_sha..head_sha`,
-the union of the group's PRs). A missing base, a diff git cannot compute, or an unclassified path
-still prints all true, so an unknown tree runs the full matrix rather than skipping it.
+the union of the group's PRs). A missing base, a diff git cannot compute, an unclassified path, or a
+diff that edits the classifier inputs still prints all true, so an unknown tree runs the full matrix
+rather than skipping it.
 
 The `ci-changes` fixture covers a docs diff (all false), a Rust diff (`rust=true`, `godot=false`), a
-missing base (all true) and an unclassified path (all true). The queue's after-number needs a
-docs-only merge group, so PR #75's 954 s stays the baseline in this record; this change's own PR is
-code-class (it edits `scripts/ci-check`), and the next docs-only group reports the new number.
+missing base (all true), an unclassified path (all true) and a classifier edit (all true). The
+classifier has run on both code-class merge groups since it landed (14 and 8 changed files, each ran
+the matrix); the queue's wall time includes the required CodeQL and Secret-scan runs and varies with
+runner load (PR #75 954 s, PR #76 1511 s), so the row's measure is the docs-only group's skipped-job
+list, recorded when the first such group runs.
 
 Commits: e109329, 98c8f4f, 59dfac4
 
@@ -3012,25 +3017,31 @@ Commits: 8b5059c
 
 ## BUILD-147
 
-**The fixture git-environment rule is prose-only, so the next fixture can corrupt the caller's repository** - PR
-#80's fixtures ran under a hunk-level commit's pre-commit hook and inherited
-`GIT_DIR`/`GIT_INDEX_FILE`: the roadmap selftest's `git -C <fixture> init` wrote `core.worktree`
-into the real `.git/config`, the docs evidence fixture's `git add` wrote its file list into the real
-index, and `docs-check` read the synthetic index. The fix stripped `GIT_*` in
-`fixture_env`/`fixture_git` and `testing.md` states the rule, but a new fixture can still call `git
--C` directly. Fix: put a `git` shim first on `PATH` for the whole smoke that execs the real git
-under `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY`,
-so every fixture and copied gate is covered mechanically; add a check that a fixture command with an
-empty `GIT_INDEX_FILE` still works, and drop the now-redundant helpers.
+**The fixture git-environment rule is prose-only, so the next fixture can corrupt the caller's repository** - `scripts/tooling-smoke`
+puts a `git` shim first on `PATH` that execs the real git under `env -u GIT_DIR -u GIT_WORK_TREE -u
+GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY`, so every fixture and every copied gate in
+the smoke uses the tree it names, even under a pre-commit hook. The `fixture git environment` check
+runs `git -C <repo> status` with an empty `GIT_INDEX_FILE` and must succeed; the redundant
+`fixture_env`/`fixture_git` helpers are gone, and `testing.md` describes the shim.
+
+The incident: PR #80's fixtures ran under a hunk-level commit's hook, the roadmap selftest wrote
+`core.worktree` into the real `.git/config`, the docs fixture wrote its file list into the real
+index, and `docs-check` read the synthetic index. BUILD-146 and the sanitized fixtures fixed the
+symptoms; this makes the rule structural.
+
+Commits: cd41c9e
 
 ## BUILD-148
 
-**A diff can classify its own edit to the classifier, so marking app paths docs skips the queue matrix** - BUILD-142
-removed the merge-group all-true branch, so the queue runs the class the diff's own
-`scripts/ci-classes.env` and `classify-changes` produce. A PR that adds an app path to
-`DOCS_PATTERNS` and changes that path is docs-only under its own patterns in both the pull-request
-and merge-group runs; before BUILD-142 the stock queue job forced the matrix because the PR did not
-edit `ci.yml`. Fix: `scripts/ci-changes` forces every bit true when the diff names
-`scripts/ci-classes.env`, `scripts/classify-changes` or `scripts/ci-changes`, so a classifier edit
-always pays the matrix. Tests: the `ci-changes` fixture commits an edit to `ci-classes.env` and
-asserts all four bits are true.
+**A diff can classify its own edit to the classifier, so marking app paths docs skips the queue matrix** - `scripts/ci-changes`
+forces every bit true when the diff names `scripts/ci-classes.env`, `scripts/classify-changes` or
+`scripts/ci-changes`, so a pattern or classifier edit always runs the full matrix even if the edited
+patterns would mark themselves docs. The `ci-changes` fixture commits an edit to `ci-classes.env`
+after the docs and Rust commits and asserts `rust=godot=node=macos=true`; the commit skill states
+the rule.
+
+The remaining trust boundary is the workflow file: `pull_request` and `merge_group` both execute the
+PR's `ci.yml`, so a workflow edit can still weaken its own gate; review is the control, and
+`CODEOWNERS` names the maintainer for every path.
+
+Commits: 5fec2ae
