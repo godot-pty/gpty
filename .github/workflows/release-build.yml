@@ -42,12 +42,34 @@ on:
         description: Version (vX.Y.Z) stamped into the bundles and asset names
         required: true
         type: string
+      build_version:
+        description: Build identity stamped into the binaries (nightly
+          X.Y.Z-nightly.YYYYMMDD+gsha). Empty keeps the crate version.
+        required: false
+        type: string
+        default: ""
+      artifact_retention_days:
+        description: Retention for the between-job artifacts (nightly passes 1)
+        required: false
+        type: number
+        default: 3
   workflow_dispatch:
     inputs:
       version:
         description: Version (vX.Y.Z) stamped into the bundles and asset names
         required: true
         type: string
+      build_version:
+        description: Build identity stamped into the binaries (nightly
+          X.Y.Z-nightly.YYYYMMDD+gsha). Empty keeps the crate version.
+        required: false
+        type: string
+        default: ""
+      artifact_retention_days:
+        description: Retention for the between-job artifacts (nightly passes 1)
+        required: false
+        type: number
+        default: 3
 
 # Read-only: no write token and no OIDC identity is present while project code
 # runs. `actions: read` is the export job's same-run artifact download; a
@@ -67,6 +89,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   VERSION: ${{ inputs.version }}
+  # The build identity the binaries report. Empty on a tag run, where
+  # gpty-core's build script falls back to the crate version.
+  GPTY_BUILD_VERSION: ${{ inputs.build_version }}
 
 jobs:
   # ── Build GDExtension per platform ───────────────────────────────────
@@ -473,20 +498,42 @@ jobs:
             "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" \
             "gdext-artifacts/gpty-macos-ffmpeg"
 
-      # Three archives and one checksum file, nothing else. The per-library
-      # assets (the GDExtension and its pinned FFmpeg) are already inside each
-      # archive; publishing them a second time made a 36-file release page that
-      # nobody could choose from, and inflated the download counts that are the
-      # project's only install signal. Entry names match the published asset
-      # names (flat basenames), so a downloaded file can be checked against its
-      # own line, and a missing artifact fails the job instead of shipping a
-      # short list.
+      # The SBOM is the bill of materials of what the three downloads contain,
+      # so the payloads are extracted and the assets the export compiles into
+      # `gpty-gui.pck` are staged beside them under their repository paths. The
+      # generator names and licenses each component from the table REUSE.toml
+      # also carries, digests every shipped file, and refuses content it has no
+      # label for - a scanner produces no components at all for a bundle of
+      # prebuilt binaries, which is why this is generated rather than scanned.
+      - name: Generate the SBOM
+        run: |
+          set -euo pipefail
+          D="$GITHUB_WORKSPACE/dist"
+          S="$RUNNER_TEMP/sbom-root"
+          mkdir -p "$S/payload" "$S/embedded/godot/assets"
+          tar -xzf "$D/gpty-${VERSION}-linux-x86_64.tar.gz" -C "$S/payload"
+          unzip -q "$D/gpty-${VERSION}-windows-x86_64.zip" -d "$S/payload"
+          unzip -q "$D/gpty-${VERSION}-macos.zip" -d "$S/payload/macos"
+          cp -a godot/fonts "$S/embedded/godot/fonts"
+          cp -a godot/assets/fonts "$S/embedded/godot/assets/fonts"
+          cp -a godot/schemes "$S/embedded/godot/schemes"
+          ./scripts/bundle-sbom "$S" "$VERSION" "$D/gpty-${VERSION}.spdx.json"
+
+      # Three archives, their bill of materials and one checksum file, nothing
+      # else. The per-library assets (the GDExtension and its pinned FFmpeg) are
+      # already inside each archive; publishing them a second time made a 36-file
+      # release page that nobody could choose from, and inflated the download
+      # counts that are the project's only install signal. Entry names match the
+      # published asset names (flat basenames), so a downloaded file can be
+      # checked against its own line, and a missing artifact fails the job
+      # instead of shipping a short list.
       - name: Generate SHA256 checksums
         run: |
           cd "$GITHUB_WORKSPACE/dist"
           sha256sum "gpty-${VERSION}-linux-x86_64.tar.gz" \
                     "gpty-${VERSION}-windows-x86_64.zip" \
-                    "gpty-${VERSION}-macos.zip" > SHA256SUMS
+                    "gpty-${VERSION}-macos.zip" \
+                    "gpty-${VERSION}.spdx.json" > SHA256SUMS
           cat SHA256SUMS
 
       - name: Upload release files
@@ -497,6 +544,7 @@ jobs:
             dist/gpty-${{ inputs.version }}-linux-x86_64.tar.gz
             dist/gpty-${{ inputs.version }}-windows-x86_64.zip
             dist/gpty-${{ inputs.version }}-macos.zip
+            dist/gpty-${{ inputs.version }}.spdx.json
             dist/SHA256SUMS
-          retention-days: 3
+          retention-days: ${{ inputs.artifact_retention_days }}
 

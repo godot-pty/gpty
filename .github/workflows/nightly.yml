@@ -1,0 +1,208 @@
+name: Nightly
+
+# One rolling prerelease of whatever main carries, rebuilt once a day and on
+# demand. The download URL is the contract: `releases/download/nightly/<asset>`
+# with version-free names, so a bug report and a `curl` line keep working after
+# tonight's build replaces today's.
+#
+# Three properties this file exists to guarantee, each one a decision:
+# - The build is the day's main. A schedule run checks out the default branch's
+#   head, so `github.sha` is what shipped; a quiet day is skipped by comparing it
+#   to the release's current target, which costs one job.
+# - The old nightly survives a failure. `publish` needs `build`, so a failed
+#   platform leaves the previous night's release untouched - never a delete and
+#   recreate, whose window is the 404 every rolling-release project lives with.
+#   Assets are replaced with `gh release upload --clobber` instead.
+# - The tag moves with the build. `gh release edit --target` only updates the
+#   release's metadata (GitHub ignores it once the tag exists), so the ref is
+#   force-moved explicitly.
+#
+# This is also the writer of the release caches a tag only restores:
+# `release-build.yml` gates every save on `github.ref == 'refs/heads/main'`, and a
+# scheduled or dispatched run here is on main. The version input stays a plain
+# `vX.Y.Z` because `export` asserts it against the crate and because the macOS
+# `CFBundleShortVersionString` must be numeric; only the asset names are
+# version-free, and the binaries report the stamped identity.
+on:
+  schedule:
+    # Off the hour: GitHub's cron queue is congested at :00.
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # The called build workflow downloads this run's own artifacts; a called
+  # workflow can only narrow its caller's grant, never widen it.
+  actions: read
+
+concurrency:
+  # A cancel mid-publish is the corruption to avoid; a queued run rebuilds the
+  # same day's main, which the skip in `gate` then makes free.
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Decide whether main moved ────────────────────────────────────────
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+      version: ${{ steps.decide.outputs.version }}
+      build_version: ${{ steps.decide.outputs.build_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Decide whether main moved
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="v$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/gpty-cli/Cargo.toml | head -1)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build_version=${version#v}-nightly.$(date -u +%Y%m%d)+g${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          current="$(gh release view nightly --json targetCommitish --jq .targetCommitish 2>/dev/null || true)"
+          if [ "$current" = "$GITHUB_SHA" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "nightly already targets $GITHUB_SHA; nothing to build"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "nightly targets '${current:-nothing}'; building $GITHUB_SHA as ${version#v}-nightly"
+          fi
+
+  # ── Build and export, from the definition the tag path shares ────────
+  build:
+    needs: gate
+    if: needs.gate.outputs.skip != 'true'
+    permissions:
+      contents: read
+      actions: read
+    # A call job cannot carry `timeout-minutes`; each job in the called
+    # workflow has its own. `artifact_retention_days: 1` is the nightly's only
+    # difference: its between-job artifacts are consumed once, in this run.
+    uses: ./.github/workflows/release-build.yml
+    with:
+      version: ${{ needs.gate.outputs.version }}
+      build_version: ${{ needs.gate.outputs.build_version }}
+      artifact_retention_days: 1
+
+  # ── Attest and publish (write token + OIDC; no project code) ─────────
+  publish:
+    needs: [gate, build]
+    if: needs.gate.outputs.skip != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      # Download this run's gpty-release-dist artifact.
+      actions: read
+    steps:
+      - name: Download the release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gpty-release-dist
+          path: dist
+
+      # The stable names are the whole point: a URL that survives the night.
+      # The checksum file lists names, so a rename invalidates it and it is
+      # rebuilt here rather than edited.
+      - name: Give the assets their permanent names
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          mv "gpty-${VERSION}-linux-x86_64.tar.gz" gpty-linux-x86_64.tar.gz
+          mv "gpty-${VERSION}-windows-x86_64.zip" gpty-windows-x86_64.zip
+          mv "gpty-${VERSION}-macos.zip" gpty-macos.zip
+          mv "gpty-${VERSION}.spdx.json" gpty-nightly.spdx.json
+          rm -f SHA256SUMS
+          sha256sum gpty-linux-x86_64.tar.gz \
+                    gpty-windows-x86_64.zip \
+                    gpty-macos.zip \
+                    gpty-nightly.spdx.json > SHA256SUMS
+          cat SHA256SUMS
+
+      # Scorecard scores the five most recent releases and a prerelease counts,
+      # so the nightly carries its own provenance bundle asset (the
+      # `.intoto.jsonl` suffix is what its provenance probe reads) or it dilutes
+      # the score it is meant to carry.
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/gpty-linux-x86_64.tar.gz
+            dist/gpty-windows-x86_64.zip
+            dist/gpty-macos.zip
+            dist/gpty-nightly.spdx.json
+            dist/SHA256SUMS
+
+      - name: Stage the attestation bundle
+        run: |
+          set -euo pipefail
+          cp "${{ steps.attest.outputs.bundle-path }}" dist/gpty-nightly.intoto.jsonl
+          test -s dist/gpty-nightly.intoto.jsonl \
+            || { echo "the attestation bundle is empty" >&2; exit 1; }
+
+      - name: Attest the SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            dist/gpty-linux-x86_64.tar.gz
+            dist/gpty-windows-x86_64.zip
+            dist/gpty-macos.zip
+          sbom-path: dist/gpty-nightly.spdx.json
+
+      # A first night creates the release; every later night only replaces its
+      # assets, so the download URL is never absent. `--latest=false` keeps
+      # `/releases/latest` - what update_checker.gd polls - on the last stable.
+      - name: Create the release on its first night
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view nightly >/dev/null 2>&1; then
+            echo "the nightly release exists; replacing its assets"
+            exit 0
+          fi
+          gh release create nightly \
+            --prerelease \
+            --latest=false \
+            --title "Nightly" \
+            --target "$GITHUB_SHA" \
+            --notes 'Rolling development build of `main`.'
+
+      - name: Replace the assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload nightly --clobber dist/*
+
+      # Assets first, tag last: a reader between the two sees the previous
+      # night's files under the previous night's commit, never a half-swap.
+      - name: Move the tag and rewrite the notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/nightly" \
+            -f sha="$GITHUB_SHA" -F force=true
+          printf 'Rolling development build of `main`.\n\nCommit: %s\nBuilt: %s\n\nEvery asset is listed in `SHA256SUMS`, the SBOM is `gpty-nightly.spdx.json`, and the provenance bundle is `gpty-nightly.intoto.jsonl`. The archives are unsigned, so macOS 15+ quarantines a browser download - use `curl`.\n\n```bash\nsha256sum -c SHA256SUMS\ngh attestation verify <asset> --repo %s\n```\n' \
+            "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%MZ)" "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/notes.md"
+          gh release edit nightly \
+            --prerelease \
+            --latest=false \
+            --target "$GITHUB_SHA" \
+            --notes-file "$RUNNER_TEMP/notes.md"

@@ -453,7 +453,12 @@ privilege is present while project code runs:
   templates through `scripts/install-godot` from `scripts/godot-version.json`,
   asserts the four GDExtension files exist, exports Linux, Windows
   and macOS, writes `SHA256SUMS`, and uploads the three archives plus the sums
-  as `gpty-release-dist`.
+  as `gpty-release-dist`. It also extracts the three archives and stages the
+  fonts and colour schemes the export compiles into `gpty-gui.pck`, then runs
+  `scripts/bundle-sbom` over that tree: `gpty-<version>.spdx.json` names the
+  bundle's components (gPTY, Godot, FFmpeg, DejaVu Sans Mono, Phosphor Icons,
+  the colour schemes) and digests every shipped file. The SBOM is a line in
+  `SHA256SUMS` and ships in the same artifact.
 
   `workflow_dispatch` on that file is how the caches are filled and how the
   build definition is proved before it is used by a tag:
@@ -469,9 +474,10 @@ privilege is present while project code runs:
   measurement; the next one (or the tag run after it) is the warm one. Read the
   step timings with `gh run view <id> --json jobs`.
 - **`publish`** writes the GitHub release. It downloads the staged artifact,
-  attests the four assets, and creates the release. It does not check out the
-  repository and runs no project code. It waits on the `release` environment's
-  required reviewer.
+  attests the archives, the SBOM and `SHA256SUMS`, stages the provenance bundle
+  as `gpty-<tag>.intoto.jsonl`, signs an SBOM attestation and creates the
+  release. It does not check out the repository and runs no project code. It
+  waits on the `release` environment's required reviewer.
 - **`publish-crates`** checks out the signed tag and publishes `gpty-core`,
   `gpty-ipc`, `gpty-plugin` then `gpty` with crates.io trusted publishing:
   OIDC only, no stored token. It runs `cargo publish`'s packaged verify build,
@@ -487,9 +493,36 @@ privilege is present while project code runs:
   validates the descriptor at the tag against `main`'s validator and publishes
   over OIDC. It also uses the `release` environment.
 
-Review the `gpty-release-dist` artifact (three archives plus `SHA256SUMS`)
-before approving the first environment; the same environment protects
-`publish-crates` and the chained `mcp-registry`, so expect three approvals.
+Review the `gpty-release-dist` artifact (three archives, the SBOM and
+`SHA256SUMS`) before approving the first environment; the same environment
+protects `publish-crates` and the chained `mcp-registry`, so expect three
+approvals.
+
+### Nightly builds
+
+`.github/workflows/nightly.yml` runs at `17 5 * * *` and on demand, and is the
+same build call with three differences: `build_version` carries
+`<crate>-nightly.<YYYYMMDD>+g<sha>` into `gpty-core`'s build script (so
+`gpty version`, the About tab and the IPC `version` reply all name the build),
+`artifact_retention_days: 1` keeps the between-job artifacts overnight rather
+than three days, and its publish job renames the three archives to
+`gpty-<platform>` before uploading. It is the only writer of the release caches:
+`release-build.yml` saves on `refs/heads/main`, and a tag run restores.
+
+The release is created once and never deleted - assets are replaced with
+`gh release upload --clobber`, then the tag ref is force-moved and the notes
+rewritten with the commit and build date. A day whose head equals the release's
+current target skips after one job; a failed platform build leaves the previous
+nightly downloadable because `publish` needs `build`. The nightly publishes its
+own `.intoto.jsonl` bundle because Scorecard counts a prerelease among the five
+most recent releases.
+
+```bash
+gh workflow run nightly.yml --ref main
+gh release view nightly --json isPrerelease,targetCommitish,assets
+curl -fL -o /tmp/n.json https://api.github.com/repos/godot-pty/gpty/releases/latest
+jq -r .tag_name /tmp/n.json   # still the last stable tag
+```
 
 ## 10. Verify the published release
 
@@ -513,8 +546,20 @@ verify the assets:
 mkdir -p /tmp/gpty-release
 gh release download vX.Y.Z --pattern 'SHA256SUMS' --dir /tmp/gpty-release
 gh release download vX.Y.Z --pattern 'gpty-vX.Y.Z-*' --dir /tmp/gpty-release
+gh release download vX.Y.Z --pattern 'gpty-vX.Y.Z.spdx.json' --dir /tmp/gpty-release
 cd /tmp/gpty-release
 sha256sum -c --ignore-missing SHA256SUMS
+```
+
+The release page lists exactly six assets: the three archives, `SHA256SUMS`, the
+SBOM (`gpty-vX.Y.Z.spdx.json`) and the provenance bundle
+(`gpty-vX.Y.Z.intoto.jsonl`). The bundle is deliberately absent from
+`SHA256SUMS`, because it attests that file. Verify the SBOM attestation on any
+archive:
+
+```bash
+gh attestation verify gpty-vX.Y.Z-linux-x86_64.tar.gz --repo godot-pty/gpty \
+  --predicate-type https://spdx.dev/Document
 ```
 
 Each archive must carry `LICENSE` and `LICENSE-EXCEPTIONS.md` next to the
@@ -537,6 +582,39 @@ x86_64 and 11.0 on arm64. `zipinfo -l` must show one real
 `libavcodec.63.1.102.dylib` (and its siblings) with the `.63` and unversioned
 aliases as symlinks, not three real copies per library. The v0.8.3 asset did
 not meet this floor; the first release after the fix is the proof.
+
+### Backfilling a release's attestation bundle
+
+Releases published before the bundle asset existed carry attestations only in
+the API, so Scorecard's provenance probe sees nothing for them (it scores the
+five most recent releases, and only assets count). The bundles are still
+retrievable; one operator run over the last four stable tags lifts the score
+from 2 (one release with a bundle) to 10:
+
+```bash
+for tag in v0.8.5 v0.8.4 v0.8.3 v0.8.2; do
+  w="$(mktemp -d)"
+  gh release download "$tag" -R godot-pty/gpty -D "$w"
+  ( cd "$w" && for asset in *; do
+      [ "$asset" = SHA256SUMS ] && continue
+      gh attestation download "$asset" -R godot-pty/gpty --limit 1 \
+        || echo "no attestation for $asset (skipped)"
+    done )
+  if compgen -G "$w/sha256-*.jsonl" >/dev/null; then
+    cat "$w"/sha256-*.jsonl > "gpty-$tag.intoto.jsonl"
+    gh release upload "$tag" "gpty-$tag.intoto.jsonl" -R godot-pty/gpty
+    rm -f "gpty-$tag.intoto.jsonl"
+  else
+    echo "no attestations on $tag; nothing to backfill"
+  fi
+  rm -rf "$w"
+done
+```
+
+`gh attestation download` writes `sha256-<digest>.jsonl` into the working
+directory; concatenating them is what the action's own `bundle-path` contains
+when several subjects are attested at once. Confirm each upload with
+`gh release view "$tag" --json assets`.
 
 ## 11. Release tail
 
