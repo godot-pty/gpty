@@ -268,13 +268,21 @@ EOF
         >"$pass/docs/content/docs/changelog/v0.0.md"
     printf -- '---\ntitle: Agents\nweight: 6\n---\n' \
         >"$pass/docs/content/docs/agents/_index.md"
-    printf -- '---\ntitle: Guide\nweight: 10\n---\n\nNo repo paths named here.\n' \
+    printf -- '---\ntitle: Guide\nweight: 10\n---\n\nNames `docs/content/docs/roadmap/v0.0.md`.\n' \
         >"$pass/docs/content/docs/agents/guide.md"
     fixture_git -C "$pass" init -q
     fixture_git -C "$pass" add -A
 
     if ! out="$(env DOCS_ROOT="$pass" ./scripts/docs-check 2>&1)"; then
         printf 'the fixture tree does not pass docs-check:\n%s\n' "$out"
+        return 1
+    fi
+
+    # A hook exports a synthetic GIT_INDEX_FILE; the gate must read the tree's
+    # own index, not the caller's (BUILD-146).
+    : >"$tmp/empty-index"
+    if ! out="$(env GIT_INDEX_FILE="$tmp/empty-index" DOCS_ROOT="$pass" ./scripts/docs-check 2>&1)"; then
+        printf 'a caller git index broke docs-check:\n%s\n' "$out"
         return 1
     fi
 

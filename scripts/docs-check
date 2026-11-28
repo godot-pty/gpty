@@ -171,9 +171,14 @@ for root_md, folder, fields in (
 # worktree walk: a built extension library or a fuzz run's output exists on the
 # machine that produced it and not in a clean checkout, which would let the
 # gate pass locally and fail in CI on the same commit (v0.8.3).
+# A pre-commit hook exports GIT_DIR/GIT_INDEX_FILE for the commit it validates;
+# with them set, `ls-files` answers for that index (a hunk-level commit's
+# synthetic one), not the tree this gate judges, and every path looks missing.
+# The test fixtures and scripts/check-secrets strip them for the same reason.
+GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
 try:
     REPO_FILES = [p for p in subprocess.run(
-        ['git', '-C', ROOT, 'ls-files', '-z'], check=True,
+        ['git', '-C', ROOT, 'ls-files', '-z'], check=True, env=GIT_ENV,
         capture_output=True, text=True).stdout.split('\0') if p]
 except (OSError, subprocess.CalledProcessError) as exc:
     print(f'docs-check: cannot list tracked paths with git: {exc}', file=sys.stderr)
