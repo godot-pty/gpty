@@ -3009,3 +3009,16 @@ the pass tree with an empty `GIT_INDEX_FILE`, which must still pass. Found while
 where a hunk-level commit's pre-commit hook blocked the docs gates with those false problems.
 
 Commits: 8b5059c
+
+## BUILD-147
+
+**The fixture git-environment rule is prose-only, so the next fixture can corrupt the caller's repository** - PR
+#80's fixtures ran under a hunk-level commit's pre-commit hook and inherited
+`GIT_DIR`/`GIT_INDEX_FILE`: the roadmap selftest's `git -C <fixture> init` wrote `core.worktree`
+into the real `.git/config`, the docs evidence fixture's `git add` wrote its file list into the real
+index, and `docs-check` read the synthetic index. The fix stripped `GIT_*` in
+`fixture_env`/`fixture_git` and `testing.md` states the rule, but a new fixture can still call `git
+-C` directly. Fix: put a `git` shim first on `PATH` for the whole smoke that execs the real git
+under `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY`,
+so every fixture and copied gate is covered mechanically; add a check that a fixture command with an
+empty `GIT_INDEX_FILE` still works, and drop the now-redundant helpers.

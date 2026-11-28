@@ -56,16 +56,34 @@ check_fails() {
     fi
 }
 
-# A pre-commit hook exports GIT_DIR/GIT_INDEX_FILE for the commit it validates;
-# a fixture repository must not inherit them, or `git -C <fixture>` targets the
-# caller's repository (and runs its hook). check-secrets' fixture does the same.
-fixture_env() {
-    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
-        -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY "$@"
-}
+# A pre-commit hook exports GIT_DIR/GIT_INDEX_FILE for the commit it validates.
+# A fixture that inherits them targets the caller's repository (writing into
+# its .git/config and index) and a copied gate reads the wrong index. A `git`
+# shim first on PATH strips them for every call the smoke makes, so a new
+# fixture cannot forget the rule (testing.md, BUILD-148).
+real_git="$(command -v git)"
+mkdir -p "$tmp/bin"
+{
+    echo '#!/bin/sh'
+    printf 'exec env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \\\n'
+    printf '    -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY %s "$@"\n' "'$real_git'"
+} >"$tmp/bin/git"
+chmod +x "$tmp/bin/git"
+PATH="$tmp/bin:$PATH"
+export PATH
 
-fixture_git() {
-    fixture_env git "$@"
+# The shim is the rule, not a convention: a fixture command must ignore a
+# caller's index. Without the shim this status fails on the empty index.
+check_fixture_git_env() {
+    local repo="$tmp/shim-repo" out
+    mkdir -p "$repo"
+    git -C "$repo" init -q
+    : >"$tmp/shim-empty-index"
+    if ! out="$(env GIT_INDEX_FILE="$tmp/shim-empty-index" \
+        git -C "$repo" status --porcelain 2>&1)"; then
+        printf 'a caller git index reached a fixture command:\n%s\n' "$out"
+        return 1
+    fi
 }
 
 # bash -n for the shells; ci-check and this file are included so a syntax
@@ -270,8 +288,8 @@ EOF
         >"$pass/docs/content/docs/agents/_index.md"
     printf -- '---\ntitle: Guide\nweight: 10\n---\n\nNames `docs/content/docs/roadmap/v0.0.md`.\n' \
         >"$pass/docs/content/docs/agents/guide.md"
-    fixture_git -C "$pass" init -q
-    fixture_git -C "$pass" add -A
+    git -C "$pass" init -q
+    git -C "$pass" add -A
 
     if ! out="$(env DOCS_ROOT="$pass" ./scripts/docs-check 2>&1)"; then
         printf 'the fixture tree does not pass docs-check:\n%s\n' "$out"
@@ -354,6 +372,7 @@ EOF
     }
 }
 check "docs-check evidence fixture" check_docs_evidence_fixture
+check "fixture git environment" check_fixture_git_env
 
 # The static secret gate scans the git index; the full-history scan is gitleaks
 # in .github/workflows/secret-scan.yml.
@@ -439,8 +458,8 @@ done
 # its own checkout's `git diff`.
 fixture_commit() {
     local repo=$1 message=$2
-    fixture_git -C "$repo" add -A
-    fixture_git -C "$repo" -c user.name='Tooling fixture' -c user.email='fixture@example.invalid' \
+    git -C "$repo" add -A
+    git -C "$repo" -c user.name='Tooling fixture' -c user.email='fixture@example.invalid' \
         commit -q -m "$message"
 }
 
@@ -449,14 +468,14 @@ check_ci_selection_fixture() {
     rm -rf "$repo"
     mkdir -p "$repo/scripts"
     cp scripts/ci-check scripts/ci-classes.env "$repo/scripts/"
-    fixture_git -C "$repo" init -q
+    git -C "$repo" init -q
     printf 'fixture\n' >"$repo/README.md"
     fixture_commit "$repo" base
-    base="$(fixture_git -C "$repo" rev-parse HEAD)"
+    base="$(git -C "$repo" rev-parse HEAD)"
     mkdir -p "$repo/docs/content/docs"
     printf 'fixture\n' >"$repo/docs/content/docs/note.md"
     fixture_commit "$repo" docs
-    out="$(fixture_env env CI_CHECK_STAMP="$tmp/no-stamp" CI_CHECK_RANGE_FROM="$base" \
+    out="$(env CI_CHECK_STAMP="$tmp/no-stamp" CI_CHECK_RANGE_FROM="$base" \
         bash "$repo/scripts/ci-check" --stamped --classify 2>&1)" || return 1
     steps="$(sed -n 's/^  steps: //p' <<<"$out")"
     for id in tests gut smoke; do
@@ -476,7 +495,7 @@ check_ci_selection_fixture() {
     mkdir -p "$repo/crates/gpty-core/src"
     printf 'fn main() {}\n' >"$repo/crates/gpty-core/src/lib.rs"
     fixture_commit "$repo" code
-    out="$(fixture_env env CI_CHECK_STAMP="$tmp/no-stamp" CI_CHECK_RANGE_FROM="$base" \
+    out="$(env CI_CHECK_STAMP="$tmp/no-stamp" CI_CHECK_RANGE_FROM="$base" \
         bash "$repo/scripts/ci-check" --stamped --classify 2>&1)" || return 1
     steps="$(sed -n 's/^  steps: //p' <<<"$out")"
     for id in tests gut smoke; do
@@ -569,14 +588,14 @@ check_ci_changes_fixture() {
     rm -rf "$repo"
     mkdir -p "$repo/scripts"
     cp scripts/ci-changes scripts/classify-changes scripts/ci-classes.env "$repo/scripts/"
-    fixture_git -C "$repo" init -q
+    git -C "$repo" init -q
     printf 'fixture\n' >"$repo/README.md"
     fixture_commit "$repo" base
-    base="$(fixture_git -C "$repo" rev-parse HEAD)"
+    base="$(git -C "$repo" rev-parse HEAD)"
     mkdir -p "$repo/docs/content/docs"
     printf 'fixture\n' >"$repo/docs/content/docs/note.md"
     fixture_commit "$repo" docs
-    out="$(fixture_env env BASE="$base" HEAD="$(fixture_git -C "$repo" rev-parse HEAD)" \
+    out="$(env BASE="$base" HEAD="$(git -C "$repo" rev-parse HEAD)" \
         bash "$repo/scripts/ci-changes")" || return 1
     if [ "$out" != "$(printf 'rust=false\ngodot=false\nnode=false\nmacos=false')" ]; then
         printf 'a docs-only diff classified as:\n%s\n' "$out"
@@ -585,7 +604,7 @@ check_ci_changes_fixture() {
     mkdir -p "$repo/crates/gpty-core/src"
     printf 'fn main() {}\n' >"$repo/crates/gpty-core/src/lib.rs"
     fixture_commit "$repo" code
-    out="$(fixture_env env BASE="$base" HEAD="$(fixture_git -C "$repo" rev-parse HEAD)" \
+    out="$(env BASE="$base" HEAD="$(git -C "$repo" rev-parse HEAD)" \
         bash "$repo/scripts/ci-changes")" || return 1
     grep -qx 'rust=true' <<<"$out" || {
         printf 'a code diff lost rust:\n%s\n' "$out"
@@ -595,7 +614,7 @@ check_ci_changes_fixture() {
         printf 'a Rust-only diff selected godot:\n%s\n' "$out"
         return 1
     }
-    out="$(fixture_env env BASE=none HEAD="$(fixture_git -C "$repo" rev-parse HEAD)" \
+    out="$(env BASE=none HEAD="$(git -C "$repo" rev-parse HEAD)" \
         bash "$repo/scripts/ci-changes")" || return 1
     grep -qx 'rust=true' <<<"$out" || {
         printf 'a missing base did not fall back:\n%s\n' "$out"
