@@ -2948,3 +2948,33 @@ the rule DOCS-55 established for PR runs stops at the queue. Fix: in the `change
 class into the merge-group head; keep the full matrix for a code range. Tests: a `merge_group`
 fixture exercising `scripts/classify-changes` and the job's output; measure the queue wall time for
 a docs PR.
+
+## BUILD-143
+
+**`scripts/pr` cannot print a PR's check class, so the run is read by hand** - `scripts/pr checks
+[PR] [--json]` now prints the PR head, the pull_request CI run with success/skipped/failed/pending
+counts and the skipped names, and the required contexts read from the live `main protection` ruleset
+matched against `gh pr checks`; it exits 0 when every required check passes, 1 when one does not
+(including missing) and 2 on a read failure. `pr selftest` covers a docs-class document (10 skipped,
+2/2 required), a failed `ci-gate` and a pending/missing set; the commit guide, `testing.md` and the
+session wrap-up skill name the command. Measured on the merged PRs: `./scripts/pr checks 75` prints
+`15 jobs: 5 success, 10 skipped, 0 failed` and `required 6/6 pass`, and `./scripts/pr checks 76
+--json` reports a full run with `skipped: 0`. Verified with `bash -n scripts/pr`, `./scripts/pr
+selftest`, `./scripts/tooling-smoke` and the two real PRs.
+
+Commits: 2874b45
+
+## BUILD-144
+
+**`ci-check --fast` runs the whole fast set when the index is empty, and the guide says to run it before staging** - `ci-check`
+now prints `--fast sees an empty index and runs the whole fast set. Stage first, or let the
+pre-commit hook run it.` when `--fast` has no `CI_CHECK_RANGE_FROM` and `git diff --cached` is
+empty; a hand run with a staged index still takes the docs/tooling class subset, and the pre-commit
+hook runs on the staged index. The commit guide's step 1 and pre-commit bullet now name the hook as
+the fast gate, and `testing.md` records the empty-index case. Measured: the two pre-staging manual
+runs took 22-23 s each and ran media/fmt/clippy/cost/tooling, while a staged docs range takes the
+docs subset; the clean-index run prints the note and exits 0. Verified with `bash -n
+scripts/ci-check`, the clean-index `--fast` note, `./scripts/tooling-smoke`, `docs-check` and
+`roadmap audit`.
+
+Commits: 2874b45, e8b8937

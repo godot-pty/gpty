@@ -1048,6 +1048,9 @@ elif [ -z "${CI_CHECK_FULL:-}" ] \
     printf "  %bTooling-class change%b — docs, cost and script gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
     SELECTED=(docs cost tooling)
 elif $FAST; then
+    if [ -z "${CI_CHECK_RANGE_FROM:-}" ] && [ -z "$(changed_paths)" ]; then
+        printf "  %b--fast sees an empty index and runs the whole fast set. Stage first, or let the pre-commit hook run it.%b\n" "$BOLD" "$NC"
+    fi
     SELECTED=(media fmt workflows docs capabilities secrets theme guards ffi log lock clippy cost tooling)
 else
     SELECTED=("${STEPS[@]}")
