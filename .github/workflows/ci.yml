@@ -91,6 +91,17 @@ jobs:
           python3 scripts/build-wiki --check
           python3 scripts/build-docs --check
 
+      # The license boundary is a gate, not a convention: `reuse lint` fails on
+      # a tracked file with no licence or no copyright. Pinned, because a
+      # loosened lint in a later release must be a deliberate bump.
+      - name: Install reuse
+        run: |
+          pipx install 'reuse==6.3.0'
+          reuse --version
+
+      - name: Check licence metadata
+        run: reuse lint
+
       # The tooling scripts' own smoke (bash -n, py_compile, a planned
       # backfill, the index secret scan). It was local-only; a broken tooling
       # script could pass CI and fail the next pre-push.

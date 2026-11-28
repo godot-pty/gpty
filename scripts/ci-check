@@ -482,6 +482,25 @@ run_bundle_check() {
     fi
 }
 
+# The license boundary is machine-readable only if a tool reads it. `reuse lint`
+# fails on a tracked file with no licence or no copyright, and on a licence
+# expression whose text is missing from LICENSES/ - so REUSE.toml cannot drift
+# from the tree it describes, and a new file cannot land unlabelled.
+run_reuse_lint() {
+    header "REUSE licence metadata"
+    if ! command -v reuse >/dev/null 2>&1; then
+        skip_gate "reuse (pipx install reuse==6.3.0)"
+        return
+    fi
+    if REUSE_OUT="$(reuse lint 2>&1)"; then
+        pass "REUSE"
+    else
+        fail "REUSE — a file or licence text is missing"
+        detail "$REUSE_OUT"
+        check_failed
+    fi
+}
+
 run_cost_stamp() {
     header "cost figures"
     if STAMP_OUT="$(./scripts/measure-cost --stamp 2>&1)"; then
@@ -601,6 +620,10 @@ step_docs() {
     # godot/knowledge.json and godot/docs.json are what release builds read. A
     # stale bundle ships old text, so it fails here rather than at export.
     run_bundle_check
+
+    # Last, because it reads the tree those bundles are part of: a new file
+    # needs a licence before it needs anything else checked about it.
+    run_reuse_lint
 }
 
 # ── Step 2.5: capability catalogue ─────────────────────────────────────
