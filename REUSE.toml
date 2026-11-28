@@ -1,0 +1,132 @@
+version = 1
+
+# Licensing for every tracked file. Most of this repository cannot carry a
+# header: `reuse` 6.3 has no comment style for GDScript, `.tscn`, `.uid`,
+# `.import` or `.json`, and a header inside a Godot resource or a Markdown body
+# is a change to the content. REUSE.toml is the specified mechanism for exactly
+# that case, so the boundary lives here instead of in 1400 file headers.
+#
+# The tool associates the LAST matching [[annotations]] table with a file, so
+# the broad GPL table comes first and each narrower license after it. What the
+# tables encode is the prose in LICENSE-EXCEPTIONS.md, file by file:
+#
+# - core (crates, godot, scripts, docs, CI, data-derived caches): GPL-3.0-or-later
+# - extensions/gpty-omp-events: MIT, its own LICENSE
+# - godot/addons/gut: MIT (Tom "Butch" Wesley), its own LICENSE.md
+# - *_/fonts: OFL-1.1, from the in-tree godot/addons/gut/fonts/OFL.txt
+# - godot/fonts: Bitstream-Vera (DejaVu Sans Mono)
+# - godot/assets/fonts: MIT (Phosphor Icons)
+# - godot/concepts.default.json, profiles.default.json, .gutconfig.json:
+#   Apache-2.0 (LICENSE-EXCEPTIONS.md section 2, data files)
+# - godot/schemes: the ten upstream palettes MIT, vivid.json Apache-2.0
+#   (LICENSE-EXCEPTIONS.md section 4)
+#
+# `LICENSE`, `LICENSE-EXCEPTIONS.md`, `LICENSES/**` and this file are not
+# Covered Files under the specification and are deliberately absent.
+
+[[annotations]]
+path = [
+  ".entire/**",
+  ".github/**",
+  ".omp/**",
+  ".pi/**",
+  "assets/**",
+  "crates/**",
+  "dist/**",
+  "docs/**",
+  "fuzz/**",
+  "githooks/**",
+  "godot/**",
+  "scripts/**",
+  ".gitignore",
+  "AGENTS.md",
+  "CHANGELOG.md",
+  "CODE_OF_CONDUCT.md",
+  "CONTRIBUTING.md",
+  "Cargo.lock",
+  "Cargo.toml",
+  "GOVERNANCE.md",
+  "MAINTAINERS.md",
+  "README.md",
+  "RELEASING.md",
+  "ROADMAP.md",
+  "SECURITY.md",
+  "SUBPROJECTS.md",
+  "SUPPORT.md",
+  "deny.toml",
+  "mcp.json",
+  "rust-toolchain.toml",
+  "security-insights.yml",
+  "server.json",
+]
+SPDX-FileCopyrightText = "2026 Neil Pathare <https://github.com/godot-pty>"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = ["extensions/gpty-omp-events/**"]
+SPDX-FileCopyrightText = "2026 Neil Pathare <https://github.com/godot-pty>"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["godot/addons/gut/**"]
+SPDX-FileCopyrightText = '2018 Tom "Butch" Wesley <https://github.com/bitwes>'
+SPDX-License-Identifier = "MIT"
+
+# GUT's display-test fonts, and the BitmapFont beside them. All four families
+# are under the SIL Open Font License; the text is the in-tree
+# `godot/addons/gut/fonts/OFL.txt`, which carries the Anonymous Pro notice, and
+# the other families' notices live with their upstream projects. This table
+# comes after the GUT one so the fonts are not labelled MIT.
+[[annotations]]
+path = [
+  "godot/addons/gut/fonts/**",
+  "godot/addons/gut/source_code_pro.fnt",
+  "godot/addons/gut/source_code_pro.fnt.import",
+]
+SPDX-FileCopyrightText = "the Anonymous Pro, Courier Prime, Lobster Two and Source Code Pro authors"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["godot/fonts/**"]
+SPDX-FileCopyrightText = "the DejaVu fonts authors"
+SPDX-License-Identifier = "Bitstream-Vera"
+
+[[annotations]]
+path = ["godot/assets/fonts/**"]
+SPDX-FileCopyrightText = "Phosphor Icons contributors <https://phosphoricons.com>"
+SPDX-License-Identifier = "MIT"
+
+# The default data files the engine reads at runtime (LICENSE-EXCEPTIONS.md
+# section 2). `godot/docs.json` and `godot/knowledge.json` are generated caches
+# of the GPL-licensed documentation, so they stay under the core table above.
+[[annotations]]
+path = [
+  "godot/.gutconfig.json",
+  "godot/concepts.default.json",
+  "godot/profiles.default.json",
+]
+SPDX-FileCopyrightText = "2026 Neil Pathare <https://github.com/godot-pty>"
+SPDX-License-Identifier = "Apache-2.0"
+
+# The ten upstream palettes of LICENSE-EXCEPTIONS.md section 4.
+[[annotations]]
+path = [
+  "godot/schemes/catppuccin-latte.json",
+  "godot/schemes/catppuccin-mocha.json",
+  "godot/schemes/dracula.json",
+  "godot/schemes/gruvbox-dark.json",
+  "godot/schemes/gruvbox-light.json",
+  "godot/schemes/nord.json",
+  "godot/schemes/one-light.json",
+  "godot/schemes/solarized-dark.json",
+  "godot/schemes/solarized-light.json",
+  "godot/schemes/tokyo-night.json",
+]
+SPDX-FileCopyrightText = "the upstream palette authors named in LICENSE-EXCEPTIONS.md"
+SPDX-License-Identifier = "MIT"
+
+# gPTY's own palette, last so it wins over the table above.
+[[annotations]]
+path = ["godot/schemes/vivid.json"]
+SPDX-FileCopyrightText = "2026 Neil Pathare <https://github.com/godot-pty>"
+SPDX-License-Identifier = "Apache-2.0"

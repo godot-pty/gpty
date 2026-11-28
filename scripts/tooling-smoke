@@ -107,11 +107,17 @@ check_fails "dev-linker reports no linker" \
 
 # A compile for the Python tools (no imports executed).
 for f in scripts/render-cost-chart scripts/fix-forensics scripts/check-github-settings \
-    scripts/install-godot scripts/release-prepare scripts/roadmap_lib.py; do
+    scripts/install-godot scripts/release-prepare scripts/roadmap_lib.py \
+    scripts/bundle-sbom; do
     check "compile $f" python3 -c \
         'import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)' \
         "$f" "$tmp/$(basename "$f").pyc"
 done
+
+# The SBOM is release-critical and otherwise only runs at tag time: the fixture
+# proves the document's shape, the font licenses and the refusal of unlabelled
+# embedded content.
+check "bundle-sbom self-test" ./scripts/bundle-sbom --self-test
 
 # A folder of release archives when this machine has one, otherwise an empty
 # temp root: the plan must parse and exit 0 either way.

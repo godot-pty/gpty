@@ -235,13 +235,41 @@ jobs:
       # `gh attestation verify <asset> --repo godot-pty/gpty`. SHA256SUMS proves
       # integrity in transit; this is what proves where the bytes came from.
       - name: Attest build provenance
+        id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/gpty-${{ github.ref_name }}-linux-x86_64.tar.gz
             dist/gpty-${{ github.ref_name }}-windows-x86_64.zip
             dist/gpty-${{ github.ref_name }}-macos.zip
+            dist/gpty-${{ github.ref_name }}.spdx.json
             dist/SHA256SUMS
+
+      # The bundle is the signature as a file. Scorecard reads release assets,
+      # not the attestation API, and its provenance probe is the `.intoto.jsonl`
+      # suffix. It attests SHA256SUMS, so it is deliberately not a line inside
+      # SHA256SUMS - a file cannot carry the digest of its own signature.
+      - name: Stage the attestation bundle
+        run: |
+          set -euo pipefail
+          cp "${{ steps.attest.outputs.bundle-path }}" \
+            "dist/gpty-${{ github.ref_name }}.intoto.jsonl"
+          test -s "dist/gpty-${{ github.ref_name }}.intoto.jsonl" \
+            || { echo "the attestation bundle is empty" >&2; exit 1; }
+
+      # `attest-build-provenance` has no `sbom-path` input, so the SBOM
+      # predicate is signed by `actions/attest` itself: the same pinned commit
+      # the wrapper calls, and the subject set is the artifacts the SBOM covers.
+      # Verified with `gh attestation verify <asset> --predicate-type
+      # https://spdx.dev/Document`.
+      - name: Attest the SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            dist/gpty-${{ github.ref_name }}-linux-x86_64.tar.gz
+            dist/gpty-${{ github.ref_name }}-windows-x86_64.zip
+            dist/gpty-${{ github.ref_name }}-macos.zip
+          sbom-path: dist/gpty-${{ github.ref_name }}.spdx.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
@@ -250,6 +278,8 @@ jobs:
             dist/gpty-${{ github.ref_name }}-linux-x86_64.tar.gz
             dist/gpty-${{ github.ref_name }}-windows-x86_64.zip
             dist/gpty-${{ github.ref_name }}-macos.zip
+            dist/gpty-${{ github.ref_name }}.spdx.json
+            dist/gpty-${{ github.ref_name }}.intoto.jsonl
             dist/SHA256SUMS
           # A release that is silently missing an asset is worse than a failed job.
           fail_on_unmatched_files: true
@@ -278,4 +308,20 @@ jobs:
 
             The binaries are not code-signed (no Authenticode or notarization yet);
             the attestation is the signature.
+
+            ### Bill of materials
+
+            `gpty-<version>.spdx.json` is a Software Bill of Materials for the
+            three archives: every shipped file with its SHA-256, including the
+            bundled FFmpeg libraries, the fonts and the colour schemes. Its
+            signature is an SBOM attestation over the same artifacts:
+
+            ```bash
+            gh attestation verify <asset> --repo godot-pty/gpty \
+              --predicate-type https://spdx.dev/Document
+            ```
+
+            `gpty-<version>.intoto.jsonl` is the signed provenance bundle for the
+            same assets, published for tools that read a signature file instead of
+            the attestation API.
           generate_release_notes: true

@@ -6,7 +6,7 @@
 
   ![GitHub Downloads](https://img.shields.io/github/downloads/godot-pty/gpty/total) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/godot-pty/gpty/badge)](https://securityscorecards.dev/viewer/?uri=github.com/godot-pty/gpty) [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/godot-pty/gpty#verifying-releases)
 
-  [![GitHub Releases](https://img.shields.io/badge/platform-_Windows_|_Linux_|_macOS-blue)](https://github.com/godot-pty/gpty/releases/latest) ![LLM-powered](https://img.shields.io/badge/code-LLM_Powered-blue)
+  [![GitHub Releases](https://img.shields.io/badge/platform-_Windows_|_Linux_|_macOS-blue)](https://github.com/godot-pty/gpty/releases/latest) [![Nightly](https://img.shields.io/badge/nightly-daily-blue)](https://github.com/godot-pty/gpty/releases/tag/nightly) ![LLM-powered](https://img.shields.io/badge/code-LLM_Powered-blue)
 
 </div>
 
@@ -152,6 +152,24 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 Every release also bundles the gPTY knowledge base; the **Knowledge Base** profile in the sidebar opens the bundled wiki from your user data.
 
 In the file names, `<version>` is the release tag you downloaded (for example `v0.7.0`).
+
+### Nightly builds
+
+Every night at 05:17 UTC a build of that day's `main` replaces one rolling
+[`nightly` prerelease](https://github.com/godot-pty/gpty/releases/tag/nightly).
+Its assets have no version in the name, so the URL is permanent:
+
+```bash
+curl -fL -O https://github.com/godot-pty/gpty/releases/download/nightly/gpty-linux-x86_64.tar.gz
+curl -fL -O https://github.com/godot-pty/gpty/releases/download/nightly/gpty-macos.zip
+curl -fL -O https://github.com/godot-pty/gpty/releases/download/nightly/gpty-windows-x86_64.zip
+```
+
+`gpty version` names the build it came from, for example
+`gpty 0.8.6-nightly.20261128+gabc1234` - a bug report against a nightly should
+quote that line. Use `curl` rather than a browser on macOS: the archives are
+unsigned, so a browser download is quarantined. `/releases/latest` stays on the
+last stable, so the in-app update check never offers a nightly.
 
 ### Verifying releases
 

@@ -250,6 +250,11 @@ pub struct Manifest {
 
 /// The crate's own version — what `min_gpty_version` is compared against at
 /// install time.
+///
+/// Deliberately the numeric crate version, not `gpty_core::BUILD_VERSION`: a
+/// nightly stamp (`0.8.6-nightly.20261128+gabc1234`) is not what a manifest's
+/// `min_gpty_version` means, and `SemVer::parse` here validates the plain
+/// `X.Y.Z` form.
 pub fn current_version() -> SemVer {
     SemVer::parse(env!("CARGO_PKG_VERSION")).expect("CARGO_PKG_VERSION is a valid X.Y.Z")
 }

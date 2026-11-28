@@ -134,7 +134,7 @@ and compiles no network protocol.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `get_app_version()` | `String` | App version from `CARGO_PKG_VERSION` (static - call as `GptyTerminal.get_app_version()`) |
+| `get_app_version()` | `String` | The version this build was produced as (`gpty_core::BUILD_VERSION`: `CARGO_PKG_VERSION`, plus the nightly stamp when one was supplied) (static - call as `GptyTerminal.get_app_version()`) |
 | `get_ipc_protocol_version()` | `String` | Static - the control-IPC protocol version (`gpty_ipc::protocol::PROTOCOL_VERSION`), the single definition the server's `version` method reports and the CLI prints; the About tab reads it so the label cannot drift from the wire |
 | `installed_plugin_profiles()` | `String` | Static - JSON array of `{plugin_id, revision, name, tiles}`, one entry per profile of every **enabled** installed plugin, in store order (`tiles` are the manifest's raw tile dictionaries; the caller sanitizes each field). Reads `<state_dir>/plugins.json`; a missing or broken store is `[]` plus one warn, never an error. Plugins installed before the profiles migration, and profile entries without a string `name` or a `tiles` list, contribute nothing |
 | `uninstall_plugin(plugin_id)` | `String` | Static - remove an installed plugin's record and its content/runtime directories, sharing `gpty-plugin`'s store removal with `gpty plugin uninstall`. Answers `{"ok": true, "id": ..., "warnings": [...]}` or `{"ok": false, "error": ...}`. The record is removed first; directory removal is best-effort and reported in `warnings`. The sidebar's profile-row trash calls this after its check/cross |

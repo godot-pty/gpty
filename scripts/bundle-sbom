@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""Write the SPDX bill of materials for a staged gPTY bundle.
+
+Usage:
+    scripts/bundle-sbom --self-test
+    scripts/bundle-sbom <stage-dir> <version> <output.spdx.json>
+
+<stage-dir> is the tree the release job assembles:
+
+    payload/...                 the three archives, extracted in place
+    embedded/<repo-path>/...    source assets the Godot export bakes into
+                                gpty-gui.pck, staged under their repository path
+                                so this script can name and license them
+
+Why not syft: syft catalogues installed packages, and a gPTY bundle is a set of
+prebuilt binaries with no package database - pointed at the real payload it
+reports zero components. The bill of materials is therefore built from what the
+release job already knows (the crate version, `scripts/godot-version.json`, and
+`scripts/media-deps`) plus a SHA-256 for every shipped file, so it describes the
+bytes inside the archives rather than a build tree.
+
+A path under `embedded/` missing from EMBEDDED is a hard error: a new embedded
+asset cannot ship unlabelled. The licenses are the ones REUSE.toml assigns the
+same paths, which `reuse lint` checks.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+GODOT_MANIFEST = ROOT / "scripts" / "godot-version.json"
+MEDIA_DEPS = ROOT / "scripts" / "media-deps"
+
+# Repository path staged for the export -> (component name, SPDX license id).
+# REUSE.toml carries the same three paths and the same identifiers.
+EMBEDDED = {
+    "godot/fonts": ("DejaVu Sans Mono", "Bitstream-Vera"),
+    "godot/assets/fonts": ("Phosphor Icons", "MIT"),
+    "godot/schemes": ("gPTY colour schemes", "MIT OR Apache-2.0"),
+}
+# The terminal font and the icon font are the components the rows name; a stage
+# that lost them would produce a valid document about the wrong bundle.
+REQUIRED_EMBEDDED = ("godot/fonts", "godot/assets/fonts")
+
+DOCUMENT_ID = "SPDXRef-DOCUMENT"
+GPTY_ID = "SPDXRef-Package-gpty"
+
+
+def fail(message: str) -> "NoReturn":
+    print(f"bundle-sbom: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def godot_version() -> str:
+    try:
+        return json.loads(GODOT_MANIFEST.read_text(encoding="utf-8"))["version"]
+    except (OSError, KeyError, json.JSONDecodeError) as error:
+        fail(f"cannot read the Godot version from {GODOT_MANIFEST}: {error}")
+
+
+def ffmpeg_version() -> str:
+    # `scripts/media-deps` is the one place the pinned version lives; the
+    # release job links the prefix it builds.
+    try:
+        text = MEDIA_DEPS.read_text(encoding="utf-8")
+    except OSError as error:
+        fail(f"cannot read {MEDIA_DEPS}: {error}")
+    match = re.search(r'^VERSION="([^"]+)"$', text, re.MULTILINE)
+    if not match:
+        fail(f"no VERSION= line in {MEDIA_DEPS}")
+    return match.group(1)
+
+
+def slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def package(
+    name: str, version: str, license_id: str, purl: str, analyzed: bool = False
+) -> dict:
+    return {
+        "name": name,
+        "SPDXID": f"SPDXRef-Package-{slug(name)}",
+        "versionInfo": version,
+        "downloadLocation": "NOASSERTION",
+        # Only gpty's own package lists the files; SPDX 2.3 rejects `hasFiles`
+        # on a package whose files were not analyzed.
+        "filesAnalyzed": analyzed,
+        "licenseConcluded": license_id,
+        "licenseDeclared": license_id,
+        "copyrightText": "NOASSERTION",
+        "externalRefs": [
+            {
+                "referenceCategory": "PACKAGE-MANAGER",
+                "referenceType": "purl",
+                "referenceLocator": purl,
+            }
+        ],
+    }
+
+
+def embedded_component(relative: str) -> str | None:
+    """The EMBEDDED key owning a stage-relative path, longest match first."""
+    if not relative.startswith("embedded/"):
+        return None
+    inner = relative[len("embedded/") :]
+    matches = [
+        key for key in EMBEDDED if inner == key or inner.startswith(f"{key}/")
+    ]
+    return max(matches, key=len) if matches else ""
+
+
+def license_for(relative: str) -> str:
+    owner = embedded_component(relative)
+    if owner:
+        return EMBEDDED[owner][1]
+    return "NOASSERTION"
+
+
+def digests(path: Path) -> tuple[str, str]:
+    """SHA1 and SHA256 of one file: SPDX 2.3 requires SHA1 on every file."""
+    sha1 = hashlib.sha1()
+    sha256 = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            sha1.update(chunk)
+            sha256.update(chunk)
+    return sha1.hexdigest(), sha256.hexdigest()
+
+
+def build(stage: Path, version: str) -> dict:
+    if not stage.is_dir():
+        fail(f"no such stage directory: {stage}")
+    payload = stage / "payload"
+    if not payload.is_dir() or not any(payload.iterdir()):
+        fail(f"{payload} is missing or empty: the archives were not extracted")
+
+    embedded_files = [
+        path
+        for path in sorted((stage / "embedded").rglob("*"))
+        if path.is_file() and not path.is_symlink()
+    ] if (stage / "embedded").is_dir() else []
+    unlabelled = [
+        path.relative_to(stage).as_posix()
+        for path in embedded_files
+        if not embedded_component(path.relative_to(stage).as_posix())
+    ]
+    if unlabelled:
+        fail(
+            "unlabelled embedded content: "
+            + ", ".join(unlabelled)
+            + " (add its repository path to EMBEDDED here and to REUSE.toml)"
+        )
+    staged = {
+        embedded_component(path.relative_to(stage).as_posix()) for path in embedded_files
+    }
+    missing = [name for name in REQUIRED_EMBEDDED if name not in staged]
+    if missing:
+        fail("not staged: " + ", ".join(missing))
+
+    files = []
+    for path in sorted(stage.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        relative = path.relative_to(stage).as_posix()
+        sha1, sha256 = digests(path)
+        files.append(
+            {
+                "fileName": f"./{relative}",
+                "SPDXID": f"SPDXRef-File-{slug(relative)}",
+                "checksums": [
+                    {"algorithm": "SHA1", "checksumValue": sha1},
+                    {"algorithm": "SHA256", "checksumValue": sha256},
+                ],
+                "licenseConcluded": "NOASSERTION",
+                "licenseInfoInFiles": [license_for(relative)],
+                "copyrightText": "NOASSERTION",
+            }
+        )
+    if not files:
+        fail(f"no files under {stage}")
+
+    packages = [
+        package(
+            "gpty",
+            version.removeprefix("v"),
+            "GPL-3.0-or-later",
+            f"pkg:github/godot-pty/gpty@{version.removeprefix('v')}",
+            analyzed=True,
+        ),
+        package("godot", godot_version(), "MIT", f"pkg:github/godotengine/godot@{godot_version()}"),
+        package(
+            "ffmpeg",
+            ffmpeg_version(),
+            "LGPL-3.0-or-later",
+            f"pkg:generic/ffmpeg@{ffmpeg_version()}",
+        ),
+    ]
+    for repo_path in sorted(staged):
+        name, license_id = EMBEDDED[repo_path]
+        packages.append(package(name, "NOASSERTION", license_id, f"pkg:generic/{slug(name)}"))
+    packages[0]["hasFiles"] = [entry["SPDXID"] for entry in files]
+    packages[0]["downloadLocation"] = f"https://github.com/godot-pty/gpty/releases/tag/{version}"
+
+    relationships = [
+        {
+            "spdxElementId": DOCUMENT_ID,
+            "relationshipType": "DESCRIBES",
+            "relatedSpdxElement": GPTY_ID,
+        }
+    ]
+    for spec in packages[1:]:
+        relationships.append(
+            {
+                "spdxElementId": GPTY_ID,
+                "relationshipType": "CONTAINS",
+                "relatedSpdxElement": spec["SPDXID"],
+            }
+        )
+
+    # Two runs of the same version (a nightly's cron and a dispatch, say) are
+    # different documents, and SPDX wants a namespace per document: derive it
+    # from the file inventory so it is unique and still reproducible.
+    inventory = hashlib.sha256(
+        "".join(
+            f"{entry['fileName']}:{entry['checksums'][1]['checksumValue']}"
+            for entry in files
+        ).encode()
+    ).hexdigest()[:16]
+
+    return {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": DOCUMENT_ID,
+        "name": f"gpty-{version}",
+        "documentNamespace": f"https://gpty.dev/spdx/gpty-{version}-{inventory}",
+        "creationInfo": {
+            "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "creators": ["Tool: gpty-bundle-sbom"],
+        },
+        "packages": packages,
+        "files": files,
+        "relationships": relationships,
+    }
+
+
+def self_test() -> None:
+    """Build a throwaway bundle and check the document it produces."""
+    work = Path(tempfile.mkdtemp(prefix="gpty-sbom-"))
+    try:
+        (work / "payload" / "gpty-v0.0.0-linux-x86_64").mkdir(parents=True)
+        (work / "payload" / "gpty-v0.0.0-linux-x86_64" / "gpty").write_bytes(b"ELF\n")
+        (work / "payload" / "gpty-v0.0.0-linux-x86_64" / "libavcodec.so.63").write_bytes(
+            b"ELF\n"
+        )
+        os.symlink("libavcodec.so.63", work / "payload" / "gpty-v0.0.0-linux-x86_64" / "libavcodec.so")
+        for repo_path, filename in (
+            ("godot/fonts", "DejaVuSansMono.ttf"),
+            ("godot/assets/fonts", "Phosphor-Regular.ttf"),
+            ("godot/schemes", "vivid.json"),
+        ):
+            directory = work / "embedded" / repo_path
+            directory.mkdir(parents=True)
+            (directory / filename).write_bytes(b"asset\n")
+
+        document = build(work, "v0.0.0")
+        names = {spec["name"] for spec in document["packages"]}
+        for expected in ("gpty", "godot", "ffmpeg", "DejaVu Sans Mono", "Phosphor Icons"):
+            if expected not in names:
+                fail(f"self-test: {expected} missing from the document")
+        if any(
+            [checksum["algorithm"] for checksum in entry["checksums"]] != ["SHA1", "SHA256"]
+            for entry in document["files"]
+        ):
+            fail("self-test: a file does not carry its SHA1 and SHA256")
+        if any(entry["fileName"].endswith("libavcodec.so") for entry in document["files"]):
+            fail("self-test: a symlink was catalogued as a file")
+        ids = {spec["SPDXID"] for spec in document["packages"]}
+        for relationship in document["relationships"]:
+            if relationship["relatedSpdxElement"] not in ids | {
+                entry["SPDXID"] for entry in document["files"]
+            }:
+                fail("self-test: a relationship points at a missing element")
+        licenses = {entry["licenseInfoInFiles"][0] for entry in document["files"]}
+        if "Bitstream-Vera" not in licenses:
+            fail("self-test: the font's license did not reach the file entry")
+
+        # A second run over different bytes is a different document, so the
+        # namespace has to move with the inventory.
+        (work / "payload" / "gpty-v0.0.0-linux-x86_64" / "gpty").write_bytes(b"ELF2\n")
+        again = build(work, "v0.0.0")
+        if again["documentNamespace"] == document["documentNamespace"]:
+            fail("self-test: the namespace did not change with the content")
+
+        # An unlabelled embedded path must be refused, not published.
+        (work / "embedded" / "godot" / "mystery").mkdir()
+        (work / "embedded" / "godot" / "mystery" / "x.bin").write_bytes(b"x")
+        try:
+            build(work, "v0.0.0")
+        except SystemExit:
+            pass
+        else:
+            fail("self-test: an unlabelled embedded path was accepted")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    print("bundle-sbom: self-test passed")
+
+
+def main(argv: list[str]) -> int:
+    if argv == ["--self-test"]:
+        self_test()
+        return 0
+    if len(argv) != 3:
+        fail("usage: bundle-sbom <stage-dir> <version> <output.spdx.json> | --self-test")
+    stage, version, output = Path(argv[0]), argv[1], Path(argv[2])
+    document = build(stage, version)
+    output.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    print(
+        f"bundle-sbom: wrote {output} "
+        f"({len(document['files'])} files, {len(document['packages'])} components)"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -326,6 +326,9 @@ pub async fn run(client: &IpcClient, socket_path: &str, timeout: Duration) -> an
                 id,
                 serde_json::json!({
                     "protocolVersion": "2024-11-05",
+                    // The same string `scripts/mcp-registry` pins from the crate
+                    // for `server.json`; a nightly stamp here would break that
+                    // pairing without telling an MCP client anything.
                     "serverInfo": {"name": "gpty", "version": env!("CARGO_PKG_VERSION")},
                     "capabilities": {"tools": {}}
                 }),

@@ -66,10 +66,12 @@ records the checkpoints an agent must not skip, not a second runbook.
   pre-push hook, and the ~6-minute gate outlives GitHub's SSH idle timeout, so
   the SSH push dies with SIGPIPE (exit 141) after the hook passes. Confirm the
   tag with `git ls-remote --tags origin $RELEASE`.
-- **Environment approval:** download `gpty-release-dist` (three archives plus
-  `SHA256SUMS`) and measure the bytes before approving the `release`
+- **Environment approval:** download `gpty-release-dist` (three archives, the
+  SBOM and `SHA256SUMS`) and measure the bytes before approving the `release`
   environment - `sha256sum -c`, both license files in every archive, `--version`
-  from the linux binary, `scripts/check-macos-minos` on the macOS slices, and
+  from the linux binary, the SBOM's six components and a digest for every
+  shipped file (`jq '.packages[].name, (.files|length)' gpty-v*.spdx.json`),
+  `scripts/check-macos-minos` on the macOS slices, and
   `zipinfo -l` on the macOS archive for one real dylib per FFmpeg library with
   the `<major>` and unversioned names as symlinks. Read the shipped archive,
   never the bundler's intent: v0.8.4's bundler created those aliases correctly
@@ -84,7 +86,13 @@ records the checkpoints an agent must not skip, not a second runbook.
   checkpoint. The tag now publishes the four crates through crates.io trusted
   publishing and chains the MCP registry; verify the four versions on crates.io
   and the registry entry instead of running `cargo publish` or
-  `gh workflow run mcp-registry.yml` by hand. The AUR tail stays manual: an AUR
+  `gh workflow run mcp-registry.yml` by hand. The page carries six assets: the
+  three archives, `SHA256SUMS`, `gpty-<tag>.spdx.json` and
+  `gpty-<tag>.intoto.jsonl`; the SBOM has its own predicate
+  (`gh attestation verify <archive> --predicate-type https://spdx.dev/Document`),
+  and the nightly is the same build under version-free names
+  (`gh release view nightly --json isPrerelease,targetCommitish,assets`, then
+  `gpty version` from the archive, which must name the stamped build). The AUR tail stays manual: an AUR
   commit without the key on the machine is validated with `makepkg` and
   reported, never claimed as published. Close the asset-set roadmap row with
   `./scripts/roadmap close <ID>` once the published measurement is in its detail

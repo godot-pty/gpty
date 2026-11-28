@@ -206,7 +206,7 @@ fn version_handler() -> HandlerFn {
     std::sync::Arc::new(|_params| {
         Box::pin(async move {
             Ok(serde_json::json!({
-                "version": env!("CARGO_PKG_VERSION"),
+                "version": gpty_core::BUILD_VERSION,
                 "protocol": gpty_ipc::protocol::PROTOCOL_VERSION
             }))
         })
@@ -621,7 +621,7 @@ mod integration_tests {
             .await
             .expect("version should succeed");
         let result = resp.result.expect("should have result");
-        assert_eq!(result["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(result["version"], gpty_core::BUILD_VERSION);
         assert_eq!(
             result["protocol"],
             gpty_ipc::protocol::PROTOCOL_VERSION,
