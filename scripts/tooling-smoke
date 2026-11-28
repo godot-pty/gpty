@@ -56,9 +56,21 @@ check_fails() {
     fi
 }
 
+# A pre-commit hook exports GIT_DIR/GIT_INDEX_FILE for the commit it validates;
+# a fixture repository must not inherit them, or `git -C <fixture>` targets the
+# caller's repository (and runs its hook). check-secrets' fixture does the same.
+fixture_env() {
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+        -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY "$@"
+}
+
+fixture_git() {
+    fixture_env git "$@"
+}
+
 # bash -n for the shells; ci-check and this file are included so a syntax
 # error in the gate itself fails the gate.
-for f in scripts/ci-check scripts/measure-cost scripts/backfill-cost-history \
+for f in scripts/ci-check scripts/ci-changes scripts/measure-cost scripts/backfill-cost-history \
     scripts/install-cli scripts/check-secrets scripts/bot-token scripts/pr \
     scripts/git-askpass-token scripts/install-rust scripts/tooling-smoke \
     scripts/dev-linker scripts/export-check; do
@@ -189,6 +201,7 @@ check "export gate fixture" check_export_gate_fixture
 check_docs_evidence_fixture() {
     local base="$tmp/docs-fixture" out
     local pass="$base/pass" long="$base/long" nolink="$base/nolink"
+    local titleonly="$base/titleonly" unknown="$base/unknown"
     rm -rf "$base"
     mkdir -p "$pass/docs/content/docs/roadmap/details" \
         "$pass/docs/content/docs/roadmap/screenshots" \
@@ -247,7 +260,7 @@ build:
 
 ## Screenshots
 
-No captures yet.
+**Fixture capture** - row: *TEST-1 · First fixture row*. One surface: the fixture.
 EOF
     printf -- '---\ntitle: Changelog\nweight: 5\n---\n' \
         >"$pass/docs/content/docs/changelog/_index.md"
@@ -257,8 +270,8 @@ EOF
         >"$pass/docs/content/docs/agents/_index.md"
     printf -- '---\ntitle: Guide\nweight: 10\n---\n\nNo repo paths named here.\n' \
         >"$pass/docs/content/docs/agents/guide.md"
-    git -C "$pass" init -q
-    git -C "$pass" add -A
+    fixture_git -C "$pass" init -q
+    fixture_git -C "$pass" add -A
 
     if ! out="$(env DOCS_ROOT="$pass" ./scripts/docs-check 2>&1)"; then
         printf 'the fixture tree does not pass docs-check:\n%s\n' "$out"
@@ -285,6 +298,50 @@ EOF
     fi
     grep -q 'screenshot page is not linked from any markdown page' <<<"$out" || {
         printf 'the screenshot-orphan message is missing:\n%s\n' "$out"
+        return 1
+    }
+
+    cp -r "$pass" "$titleonly"
+    cat >"$titleonly/docs/content/docs/roadmap/screenshots/v0.0.md" <<'EOF'
+---
+title: "Roadmap screenshots - v0.0"
+weight: 910
+build:
+  list: never
+---
+
+## Screenshots
+
+**Fixture capture** - row: *First fixture row*. One surface: the fixture.
+EOF
+    if out="$(env DOCS_ROOT="$titleonly" ./scripts/docs-check 2>&1)"; then
+        echo "a caption citing a bare title passed docs-check"
+        return 1
+    fi
+    grep -q 'without its row ID' <<<"$out" || {
+        printf 'the caption-ID message is missing:\n%s\n' "$out"
+        return 1
+    }
+
+    cp -r "$pass" "$unknown"
+    cat >"$unknown/docs/content/docs/roadmap/screenshots/v0.0.md" <<'EOF'
+---
+title: "Roadmap screenshots - v0.0"
+weight: 910
+build:
+  list: never
+---
+
+## Screenshots
+
+**Fixture capture** - row: *TEST-9 · First fixture row*. One surface: the fixture.
+EOF
+    if out="$(env DOCS_ROOT="$unknown" ./scripts/docs-check 2>&1)"; then
+        echo "a caption citing an unknown row passed docs-check"
+        return 1
+    fi
+    grep -q 'caption cites unknown row TEST-9' <<<"$out" || {
+        printf 'the unknown-row message is missing:\n%s\n' "$out"
         return 1
     }
 }
@@ -357,7 +414,7 @@ help_scripts=(
     scripts/pr scripts/git-askpass-token scripts/check-github-settings scripts/install-rust
     scripts/install-godot scripts/release-prepare scripts/dev-linker scripts/export-check
     scripts/build-wiki scripts/build-docs scripts/docs-check scripts/ui-capture
-    scripts/ui-capture-check scripts/ci-check scripts/tooling-smoke
+    scripts/ui-capture-check scripts/ci-check scripts/ci-changes scripts/tooling-smoke
 )
 for f in "${help_scripts[@]}"; do
     check "help $f" "$f" --help
@@ -368,6 +425,60 @@ for f in "${help_scripts[@]}"; do
 done
 
 # ── The local gate's step selection and stamp ──────────────────────────
+# The pre-push --stamped path classifies the range the hook passes; the stamp
+# is written afterwards, so a docs-only first push is not the full suite
+# (BUILD-141). The gate is copied into a scratch repository because it reads
+# its own checkout's `git diff`.
+fixture_commit() {
+    local repo=$1 message=$2
+    fixture_git -C "$repo" add -A
+    fixture_git -C "$repo" -c user.name='Tooling fixture' -c user.email='fixture@example.invalid' \
+        commit -q -m "$message"
+}
+
+check_ci_selection_fixture() {
+    local repo="$tmp/ci-select" base out steps id
+    rm -rf "$repo"
+    mkdir -p "$repo/scripts"
+    cp scripts/ci-check scripts/ci-classes.env "$repo/scripts/"
+    fixture_git -C "$repo" init -q
+    printf 'fixture\n' >"$repo/README.md"
+    fixture_commit "$repo" base
+    base="$(fixture_git -C "$repo" rev-parse HEAD)"
+    mkdir -p "$repo/docs/content/docs"
+    printf 'fixture\n' >"$repo/docs/content/docs/note.md"
+    fixture_commit "$repo" docs
+    out="$(fixture_env env CI_CHECK_STAMP="$tmp/no-stamp" CI_CHECK_RANGE_FROM="$base" \
+        bash "$repo/scripts/ci-check" --stamped --classify 2>&1)" || return 1
+    steps="$(sed -n 's/^  steps: //p' <<<"$out")"
+    for id in tests gut smoke; do
+        if grep -qw "$id" <<<"$steps"; then
+            echo "a docs range selected $id: $steps"
+            return 1
+        fi
+    done
+    grep -qw docs <<<"$steps" || {
+        echo "a docs range lost the docs step: $steps"
+        return 1
+    }
+    grep -qw workflows <<<"$steps" || {
+        echo "a docs range lost the workflow lint: $steps"
+        return 1
+    }
+    mkdir -p "$repo/crates/gpty-core/src"
+    printf 'fn main() {}\n' >"$repo/crates/gpty-core/src/lib.rs"
+    fixture_commit "$repo" code
+    out="$(fixture_env env CI_CHECK_STAMP="$tmp/no-stamp" CI_CHECK_RANGE_FROM="$base" \
+        bash "$repo/scripts/ci-check" --stamped --classify 2>&1)" || return 1
+    steps="$(sed -n 's/^  steps: //p' <<<"$out")"
+    for id in tests gut smoke; do
+        grep -qw "$id" <<<"$steps" || {
+            echo "a code range lost $id: $steps"
+            return 1
+        }
+    done
+}
+
 check_ci_list_steps() {
     local out
     out="$(./scripts/ci-check --list-steps)" || return 1
@@ -443,6 +554,51 @@ EOF
     }
 }
 
+# A merge-queue group classifies its own diff: the same base/head fallbacks as
+# a pull_request run, with all-true on anything git cannot diff (BUILD-142).
+check_ci_changes_fixture() {
+    local repo="$tmp/ci-changes" base out
+    rm -rf "$repo"
+    mkdir -p "$repo/scripts"
+    cp scripts/ci-changes scripts/classify-changes scripts/ci-classes.env "$repo/scripts/"
+    fixture_git -C "$repo" init -q
+    printf 'fixture\n' >"$repo/README.md"
+    fixture_commit "$repo" base
+    base="$(fixture_git -C "$repo" rev-parse HEAD)"
+    mkdir -p "$repo/docs/content/docs"
+    printf 'fixture\n' >"$repo/docs/content/docs/note.md"
+    fixture_commit "$repo" docs
+    out="$(fixture_env env BASE="$base" HEAD="$(fixture_git -C "$repo" rev-parse HEAD)" \
+        bash "$repo/scripts/ci-changes")" || return 1
+    if [ "$out" != "$(printf 'rust=false\ngodot=false\nnode=false\nmacos=false')" ]; then
+        printf 'a docs-only diff classified as:\n%s\n' "$out"
+        return 1
+    fi
+    mkdir -p "$repo/crates/gpty-core/src"
+    printf 'fn main() {}\n' >"$repo/crates/gpty-core/src/lib.rs"
+    fixture_commit "$repo" code
+    out="$(fixture_env env BASE="$base" HEAD="$(fixture_git -C "$repo" rev-parse HEAD)" \
+        bash "$repo/scripts/ci-changes")" || return 1
+    grep -qx 'rust=true' <<<"$out" || {
+        printf 'a code diff lost rust:\n%s\n' "$out"
+        return 1
+    }
+    grep -qx 'godot=false' <<<"$out" || {
+        printf 'a Rust-only diff selected godot:\n%s\n' "$out"
+        return 1
+    }
+    out="$(fixture_env env BASE=none HEAD="$(fixture_git -C "$repo" rev-parse HEAD)" \
+        bash "$repo/scripts/ci-changes")" || return 1
+    grep -qx 'rust=true' <<<"$out" || {
+        printf 'a missing base did not fall back:\n%s\n' "$out"
+        return 1
+    }
+    printf 'an/unclassified/path\n' | ./scripts/classify-changes | grep -qx 'godot=true' || {
+        echo 'classify-changes let an unclassified path skip the matrix'
+        return 1
+    }
+}
+
 check_ci_summary() {
     local out logs="$tmp/ci-logs"
     out="$(CI_CHECK_LOG_DIR="$logs" ./scripts/ci-check --only docs --summary 2>&1)" || {
@@ -471,6 +627,8 @@ check "ci-check --list-steps" check_ci_list_steps
 check "ci-check --only docs" check_ci_only_docs
 check "ci-check --summary" check_ci_summary
 check "ci-check stamp fixture" check_ci_stamp
+check "ci-check selection fixture" check_ci_selection_fixture
 check "pre-push refs" check_pre_push_refs
+check "ci-changes fixture" check_ci_changes_fixture
 
 exit "$fail"
