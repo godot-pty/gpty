@@ -2951,29 +2951,30 @@ a docs PR.
 
 ## BUILD-143
 
-**`scripts/pr` cannot print a PR's check class, so the run is read by hand** - found 2026-11-27:
-proving the class of PRs #75/#76/#77 took three separate `gh run list`/`gh run view --json jobs`
-calls; #75 and #77 skipped 10 of 15 CI jobs while #76 ran all 15, and the required set (`ci-gate`,
-the four `Analyze (…)` jobs, `secret-scan`) had to be read from the wrap-up skill's prose. The
-information is all in the PR, the CI run and the live `main protection` ruleset, but no command
-joins them. Fix: `scripts/pr checks [PR] [--json]` - resolve the PR and its head, fetch the
-pull_request CI run and its jobs, read the required contexts from the ruleset, match them against
-`gh pr checks`, and print one line per category: the head, the CI run with
-success/skipped/failed/pending counts and the skipped names, and the required pass count with any
-failing name. Exit 0 when every required check passes, 1 when one does not (including missing), 2 on
-a read failure. Tests: `pr selftest` fixtures for a docs-class run (10 skipped, 6/6 required), a
-failed required check and a pending/missing one; `./scripts/pr checks 75` and `76 --json` on the
-real PRs.
+**`scripts/pr` cannot print a PR's check class, so the run is read by hand** - `scripts/pr checks
+[PR] [--json]` now prints the PR head, the pull_request CI run with success/skipped/failed/pending
+counts and the skipped names, and the required contexts read from the live `main protection` ruleset
+matched against `gh pr checks`; it exits 0 when every required check passes, 1 when one does not
+(including missing) and 2 on a read failure. `pr selftest` covers a docs-class document (10 skipped,
+2/2 required), a failed `ci-gate` and a pending/missing set; the commit guide, `testing.md` and the
+session wrap-up skill name the command. Measured on the merged PRs: `./scripts/pr checks 75` prints
+`15 jobs: 5 success, 10 skipped, 0 failed` and `required 6/6 pass`, and `./scripts/pr checks 76
+--json` reports a full run with `skipped: 0`. Verified with `bash -n scripts/pr`, `./scripts/pr
+selftest`, `./scripts/tooling-smoke` and the two real PRs.
+
+Commits: 2874b45
 
 ## BUILD-144
 
-**`ci-check --fast` runs the whole fast set when the index is empty, and the guide says to run it before staging** - found
-2026-11-27: two manual `ci-check --fast` runs before staging took 22 s each and ran
-media/fmt/workflows/docs/capabilities/secrets/theme/guards/ffi/log/lock/clippy/cost/tooling, while
-the pre-commit hook's staged index classifies docs and tooling changes to a subset; the commit skill
-told the reader to run `--fast` before staging, where `git diff --cached` is empty and the class
-checks cannot fire. Fix: when `--fast` has no `CI_CHECK_RANGE_FROM` and an empty index, print a note
-that the whole fast set runs and that staging first (or the pre-commit hook) classifies the range;
-correct the commit guide's step 1 and pre-commit bullet and testing.md so they say the hook runs the
-staged index. Tests: a clean-index run prints the note; a staged docs range still selects the docs
-subset (existing `docs_class_change`); the pre-commit hook's output is the proof.
+**`ci-check --fast` runs the whole fast set when the index is empty, and the guide says to run it before staging** - `ci-check`
+now prints `--fast sees an empty index and runs the whole fast set. Stage first, or let the
+pre-commit hook run it.` when `--fast` has no `CI_CHECK_RANGE_FROM` and `git diff --cached` is
+empty; a hand run with a staged index still takes the docs/tooling class subset, and the pre-commit
+hook runs on the staged index. The commit guide's step 1 and pre-commit bullet now name the hook as
+the fast gate, and `testing.md` records the empty-index case. Measured: the two pre-staging manual
+runs took 22-23 s each and ran media/fmt/clippy/cost/tooling, while a staged docs range takes the
+docs subset; the clean-index run prints the note and exits 0. Verified with `bash -n
+scripts/ci-check`, the clean-index `--fast` note, `./scripts/tooling-smoke`, `docs-check` and
+`roadmap audit`.
+
+Commits: 2874b45, e8b8937
