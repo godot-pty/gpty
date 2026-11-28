@@ -2921,3 +2921,30 @@ pane's own `_build_graph_document` - which is deterministic and is the contract 
 settle stays because a finished drag is the state being exported.
 
 Commits: e08a654
+
+## BUILD-141
+
+**The pre-push `--stamped` gate runs the full suite on a new tree** - found 2026-11-27: the
+docs-only branch's first push ran `--stamped --summary` for 242 s (Rust, GUT, smoke, audit, deny)
+while its remote PR run 46079616356 skipped every heavy job, and the gate branch's first push took
+243 s. `ci-check`'s `--stamped` help says "skip when the clean-tree stamp matches; else run the full
+gate", so the class selection a hand run (`--classify`, `--fast`) performs is not applied to the
+first push of a new tree; the commit skill's "a docs edit ... never buys the Rust, GUT and smoke
+jobs" is therefore false on the hook path. Fix: when no stamp matches, classify the pushed range the
+hook already passes (`CI_CHECK_RANGE_FROM`) and select the docs/tooling class, then seed the stamp
+with that run; keep the full suite for a code range. Tests: extend the pre-push refs fixture in
+`scripts/tooling-smoke` with a docs-class range and assert the selected steps exclude
+`tests`/`gut`/`smoke`, and a code range still selects them; measure before/after on a docs push.
+
+## BUILD-142
+
+**A docs-only PR still pays the full matrix in the merge queue** - PR #75 (docs) ran the cheap set
+on its pull_request run (46079616356: rust, gut, windows, macos, static, audit and fuzz skipped) but
+its merge-group run 46080254384 set `all_true` in the `changes` job and ran Rust, GUT, Windows,
+macOS, static, fuzz, cargo-audit and cargo-deny; the land wait was 954 s, and PR #76's queue run
+took 1511 s. The merge queue is the remote gate, but a docs-only diff cannot affect those jobs, so
+the rule DOCS-55 established for PR runs stops at the queue. Fix: in the `changes` job, classify the
+`merge_group` diff (`BASE..HEAD` from the event) instead of forcing all true, or carry the PR's
+class into the merge-group head; keep the full matrix for a code range. Tests: a `merge_group`
+fixture exercising `scripts/classify-changes` and the job's output; measure the queue wall time for
+a docs PR.
