@@ -3078,3 +3078,21 @@ names alongside the cost gates.
 Acceptance: a cold/warm table per preset in the detail; `./scripts/measure-cost --check` and
 `scripts/render-cost-chart --check --require-current` pass; every number in the Performance section
 matches the table. Depends on GUI-189.
+
+## BUILD-150
+
+**The SBOM names no Rust crates** - `gpty-<tag>.spdx.json` lists gPTY, Godot 4.7.2, FFmpeg 9.0.2,
+DejaVu Sans Mono, Phosphor Icons and the colour schemes, and digests every shipped file, but the
+largest component set in the bundle is absent: the crates linked into `gpty` and `libgpty_gdext`.
+OSPS QA-02.02 asks for a bill of materials of the compiled assets, and a reader cannot tell from
+today's document whether the shipped binary carries a crate that was patched last week. Fix: build
+the release binaries with `cargo auditable` in `release-build.yml`'s four build jobs (a pinned
+install, like the other CI downloads), which embeds the dependency graph in the executable; then
+teach `scripts/bundle-sbom` to read it back from the already-staged `gpty` - the `.dep-v0` section
+is a zlib blob of the same JSON `cargo metadata` prints - and emit one package per crate with
+`filesAnalyzed: false` and a `pkg:cargo/<name>@<version>` purl. A lockfile-derived list was
+considered and rejected: `Cargo.lock` carries dev-only and other-platform edges, so it would name
+components that are not in the shipped bytes. Verified by `bundle-sbom --self-test` growing a
+fixture binary with two crates and by `spdx-tools` still validating the document; acceptance is the
+next release's SBOM naming the crates the binary carries, with the count matching its own `cargo
+tree` set, and the provenance and SBOM attestations still verifying.

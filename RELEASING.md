@@ -452,8 +452,8 @@ privilege is present while project code runs:
   `godot/project.godot` with the version input, installs Godot and the export
   templates through `scripts/install-godot` from `scripts/godot-version.json`,
   asserts the four GDExtension files exist, exports Linux, Windows
-  and macOS, writes `SHA256SUMS`, and uploads the three archives plus the sums
-  as `gpty-release-dist`. It also extracts the three archives and stages the
+  and macOS, writes `SHA256SUMS`, and uploads the three archives, the SBOM and
+  the sums as `gpty-release-dist`. It also extracts the three archives and stages the
   fonts and colour schemes the export compiles into `gpty-gui.pck`, then runs
   `scripts/bundle-sbom` over that tree: `gpty-<version>.spdx.json` names the
   bundle's components (gPTY, Godot, FFmpeg, DejaVu Sans Mono, Phosphor Icons,
@@ -516,6 +516,11 @@ current target skips after one job; a failed platform build leaves the previous
 nightly downloadable because `publish` needs `build`. The nightly publishes its
 own `.intoto.jsonl` bundle because Scorecard counts a prerelease among the five
 most recent releases.
+
+The names are permanent, so `--clobber` is the wrong tool for a rename: it
+replaces files in place and never deletes, and a dropped asset would keep
+answering on the permanent URL. Remove one with
+`gh release delete-asset nightly <name>` in the same change that renames it.
 
 ```bash
 gh workflow run nightly.yml --ref main
